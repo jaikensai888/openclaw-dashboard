@@ -35,3 +35,6 @@ pnpm-debug.log*
 # Test
 coverage/
 .nyc_output/
+
+# Worktrees
+.worktrees/

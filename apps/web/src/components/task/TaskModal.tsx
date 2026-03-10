@@ -1,8 +1,9 @@
 'use client';
 
-import { X, Loader2, CheckCircle, XCircle, Clock, Copy, FileDown } from 'lucide-react';
+import { X, Loader2, CheckCircle, XCircle, Clock, Copy, FileDown, Check, AlertCircle } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import type { Task, TaskStatus } from '@openclaw-dashboard/shared';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 const statusLabels: Record<TaskStatus, string> = {
   pending: '等待中',
@@ -22,6 +23,31 @@ const statusColors: Record<TaskStatus, string> = {
 
 export function TaskModal() {
   const { taskModalTaskId, tasks, setTaskModalTaskId, taskOutputs } = useChatStore();
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [exportState, setExportState] = useState<'idle' | 'exported' | 'error'>('idle');
+
+  // Handle escape key globally
+  useEffect(() => {
+    if (!taskModalTaskId) return;
+
+    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setTaskModalTaskId(null);
+      }
+    };
+
+    document.addEventListener('keydown', handleGlobalKeyDown);
+    return () => document.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [taskModalTaskId, setTaskModalTaskId]);
+
+  // Focus management - focus first focusable element when modal opens
+  useEffect(() => {
+    if (taskModalTaskId && closeButtonRef.current) {
+      closeButtonRef.current.focus();
+    }
+  }, [taskModalTaskId]);
 
   if (!taskModalTaskId) return null;
 
@@ -34,20 +60,36 @@ export function TaskModal() {
     setTaskModalTaskId(null);
   };
 
-  const handleCopyAll = () => {
-    const allContent = outputs.map((o) => o.content).join('\n\n');
-    navigator.clipboard.writeText(allContent);
+  const handleCopyAll = async () => {
+    try {
+      setCopyState('idle'); // Show loading state
+      const allContent = outputs.map((o) => o.content).join('\n\n');
+      await navigator.clipboard.writeText(allContent);
+      setCopyState('copied');
+      // Reset to idle after 2 seconds
+      setTimeout(() => setCopyState('idle'), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      setCopyState('error');
+    }
   };
 
   const handleExport = () => {
-    const allContent = outputs.map((o) => o.content).join('\n\n');
-    const blob = new Blob([allContent], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `task-${task.id}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const allContent = outputs.map((o) => o.content).join('\n\n');
+      const blob = new Blob([allContent], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `task-${task.id.slice(0, 8)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportState('exported');
+      setTimeout(() => setExportState('idle'), 2000);
+    } catch (err) {
+      console.error('Failed to export:', err);
+      setExportState('error');
+    }
   };
 
   // Calculate duration
@@ -58,16 +100,39 @@ export function TaskModal() {
         )
       : null;
 
+  // Get title with length limit
+  const displayTitle = task.title || `${task.type} 任务`;
+  const truncatedTitle = displayTitle.length > 50
+    ? displayTitle.slice(0, 47) + '...'
+    : displayTitle;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={handleClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={handleClose}
+      role="presentation"
+      aria-modal="true"
+      aria-labelledby="task-modal-title"
+    >
       <div
+        ref={modalRef}
         className="bg-neutral-800 rounded-xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-neutral-700">
-          <h2 className="text-lg font-semibold">{task.title || `${task.type} 任务`}</h2>
-          <button onClick={handleClose} className="p-1 hover:bg-neutral-700 rounded">
+          <h2 id="task-modal-title" className="text-lg font-semibold truncate" title={truncatedTitle}>
+            {displayTitle.length > 50 && (
+              <span className="sr-only">完整标题: {displayTitle}</span>
+            )}
+          </h2>
+          <button
+            ref={closeButtonRef}
+            onClick={handleClose}
+            className="p-2 min-w-[44px] min-h-[44px] hover:bg-neutral-700 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+            aria-label="关闭"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -78,15 +143,15 @@ export function TaskModal() {
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-sm ${statusColors[task.status]}`}
           >
             {task.status === 'running' ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
             ) : task.status === 'completed' ? (
-              <CheckCircle className="w-4 h-4" />
+              <CheckCircle className="w-4 h-4" aria-hidden="true" />
             ) : task.status === 'failed' ? (
-              <XCircle className="w-4 h-4" />
+              <XCircle className="w-4 h-4" aria-hidden="true" />
             ) : (
-              <Clock className="w-4 h-4" />
+              <Clock className="w-4 h-4" aria-hidden="true" />
             )}
-            {statusLabels[task.status]}
+            <span>{statusLabels[task.status]}</span>
           </span>
 
           {duration !== null && (
@@ -99,26 +164,38 @@ export function TaskModal() {
           {outputs.length === 0 ? (
             <div className="text-center text-neutral-500 py-8">
               {task.status === 'running' ? (
-                <p>任务进行中...</p>
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary-500" aria-hidden="true" />
+                  <p>任务进行中...</p>
+                </div>
               ) : (
-                <p>暂无输出内容</p>
+                <div className="flex flex-col items-center gap-2">
+                  <AlertCircle className="w-6 h-6 text-neutral-500" aria-hidden="true" />
+                  <p>暂无输出内容</p>
+                </div>
               )}
             </div>
           ) : (
             <div className="space-y-4">
-              {outputs.map((output, index) => (
-                <div key={output.id || index} className="bg-neutral-700 rounded-lg p-4">
-                  {output.type === 'code' ? (
-                    <pre className="text-sm overflow-x-auto">
-                      <code>{output.content}</code>
-                    </pre>
-                  ) : (
-                    <div className="markdown-content">
-                      <p className="whitespace-pre-wrap text-sm">{output.content}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
+              {outputs.map((output, index) => {
+                const contentId = `output-${task.id.slice(0, 8)}-${index}`;
+                return (
+                  <div
+                    key={output.id || index}
+                    className="bg-neutral-700 rounded-lg p-4 min-w-0"
+                  >
+                    {output.type === 'code' ? (
+                      <pre className="text-sm overflow-x-auto">
+                        <code className="whitespace-pre-wrap break-words">{output.content}</code>
+                      </pre>
+                    ) : (
+                      <div className="markdown-content">
+                        <p className="whitespace-pre-wrap break-words text-sm">{output.content}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -127,17 +204,37 @@ export function TaskModal() {
         <div className="flex items-center justify-end gap-2 p-4 border-t border-neutral-700">
           <button
             onClick={handleCopyAll}
-            className="flex items-center gap-2 px-3 py-2 text-sm bg-neutral-700 hover:bg-neutral-600 rounded-lg transition-colors"
+            disabled={outputs.length === 0}
+            className="flex items-center gap-2 px-4 py-3 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+            aria-label={copyState === 'copied' ? '已复制' : '复制全部内容'}
           >
-            <Copy className="w-4 h-4" />
-            复制全部
+            {copyState === 'copied' ? (
+              <Check className="w-4 h-4 text-green-500" aria-hidden="true" />
+            ) : copyState === 'error' ? (
+              <XCircle className="w-4 h-4 text-red-500" aria-hidden="true" />
+            ) : (
+              <Copy className="w-4 h-4" aria-hidden="true" />
+            )}
+            <span className={copyState === 'copied' ? 'text-green-500' : copyState === 'error' ? 'text-red-500' : ''}>
+              {copyState === 'copied' ? '已复制' : copyState === 'error' ? '复制失败' : '复制全部'}
+            </span>
           </button>
           <button
             onClick={handleExport}
-            className="flex items-center gap-2 px-3 py-2 text-sm bg-neutral-700 hover:bg-neutral-600 rounded-lg transition-colors"
+            disabled={outputs.length === 0}
+            className="flex items-center gap-2 px-4 py-3 text-sm bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+            aria-label={exportState === 'exported' ? '已导出' : '导出为 Markdown 文件'}
           >
-            <FileDown className="w-4 h-4" />
-            导出
+            {exportState === 'exported' ? (
+              <Check className="w-4 h-4 text-green-500" aria-hidden="true" />
+            ) : exportState === 'error' ? (
+              <XCircle className="w-4 h-4 text-red-500" aria-hidden="true" />
+            ) : (
+              <FileDown className="w-4 h-4" aria-hidden="true" />
+            )}
+            <span className={exportState === 'exported' ? 'text-green-500' : exportState === 'error' ? 'text-red-500' : ''}>
+              {exportState === 'exported' ? '已导出' : exportState === 'error' ? '导出失败' : '导出'}
+            </span>
           </button>
         </div>
       </div>

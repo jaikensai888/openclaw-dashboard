@@ -1,0 +1,26 @@
+{
+  "name": "openclaw-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Openclaw Dashboard - Web chat interface for Openclaw Agent",
+  "scripts": {
+    "dev": "pnpm run --parallel /dev/",
+    "dev:web": "pnpm --filter @openclaw-dashboard/web dev",
+    "dev:server": "pnpm --filter @openclaw-dashboard/server dev",
+    "build": "pnpm run --parallel build:*",
+    "build:web": "pnpm --filter @openclaw-dashboard/web build",
+    "build:server": "pnpm --filter @openclaw-dashboard/server build",
+    "lint": "pnpm run --parallel lint"
+  },
+  "keywords": [
+    "openclaw",
+    "dashboard",
+    "chat",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "dashboard-plugin",
+  "name": "Dashboard Channel",
+  "description": "Connect Openclaw to Dashboard Backend for web-based chat interface",
+  "channels": ["dashboard"],
+  "capabilities": {
+    "proactiveMessaging": false,
+    "cronJobs": false
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "backendUrl": {
+        "type": "string",
+        "description": "Dashboard Backend WebSocket URL"
+      },
+      "pluginToken": {
+        "type": "string",
+        "description": "Authentication token for Dashboard Backend"
+      },
+      "name": {
+        "type": "string",
+        "description": "Display name for this connection"
+      }
+    },
+    "required": ["backendUrl"]
+  }
+}

@@ -38,6 +38,45 @@ function handleMessage(type: string, payload: unknown) {
       // Handled by createConversation in store
       break;
 
+    case 'history.conversations':
+      {
+        const { conversations } = payload as {
+          conversations: Array<{
+            id: string;
+            title?: string | null;
+            pinned: boolean;
+            createdAt: string;
+            updatedAt: string;
+          }>;
+        };
+        store.setConversations(
+          conversations.map((c) => ({
+            id: c.id,
+            title: c.title,
+            pinned: c.pinned,
+            createdAt: new Date(c.createdAt),
+            updatedAt: new Date(c.updatedAt),
+          }))
+        );
+      }
+      break;
+
+    case 'conversation.updated':
+      {
+        const { id, title, pinned, updatedAt } = payload as {
+          id: string;
+          title?: string;
+          pinned?: boolean;
+          updatedAt: string;
+        };
+        store.updateConversation(id, {
+          ...(title !== undefined ? { title } : {}),
+          ...(pinned !== undefined ? { pinned } : {}),
+          updatedAt: new Date(updatedAt),
+        });
+      }
+      break;
+
     case 'history.messages':
       {
         const { conversationId, messages } = payload as {
@@ -278,11 +317,38 @@ export function useWebSocket() {
     []
   );
 
+  const loadHistory = useCallback(() => {
+    send('history.load', {});
+  }, []);
+
+  const renameConversation = useCallback(
+    (conversationId: string, title: string) => {
+      // Optimistic update
+      const store = useChatStore.getState();
+      store.renameConversation(conversationId, title);
+      send('conversation.rename', { conversationId, title });
+    },
+    []
+  );
+
+  const togglePinConversation = useCallback(
+    (conversationId: string) => {
+      // Optimistic update
+      const store = useChatStore.getState();
+      store.togglePinConversation(conversationId);
+      send('conversation.togglePin', { conversationId });
+    },
+    []
+  );
+
   return {
     sendMessage,
     createConversation: createConversationWS,
     switchConversation,
     cancelTask,
+    loadHistory,
+    renameConversation,
+    togglePinConversation,
     isConnected: globalState.instance?.readyState === WebSocket.OPEN,
   };
 }

@@ -9,6 +9,7 @@
 export interface Conversation {
   id: string;                    // Format: conv_xxx
   title?: string;                // Conversation title
+  pinned: boolean;               // 是否置顶
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,6 +20,7 @@ export interface CreateConversationInput {
 
 export interface UpdateConversationInput {
   title?: string;
+  pinned?: boolean;
 }
 
 // ------------------------------------------------------------

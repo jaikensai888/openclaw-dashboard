@@ -4,6 +4,7 @@ import { create } from 'zustand';
 interface Conversation {
   id: string;
   title?: string | null;
+  pinned: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +52,9 @@ interface ChatState {
   createConversation: (title?: string) => string;
   deleteConversation: (id: string) => void;
   setConversations: (conversations: Conversation[]) => void;
+  renameConversation: (id: string, title: string) => void;
+  togglePinConversation: (id: string) => void;
+  updateConversation: (id: string, updates: Partial<Conversation>) => void;
 
   // Messages
   messages: Record<string, Message[]>;
@@ -93,6 +97,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const newConv: Conversation = {
       id,
       title: title || '新对话',
+      pinned: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -120,6 +125,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   setConversations: (conversations) => set({ conversations }),
+
+  renameConversation: (id, title) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, title, updatedAt: new Date() } : c
+      ),
+    }));
+  },
+
+  togglePinConversation: (id) => {
+    set((state) => {
+      const conversation = state.conversations.find((c) => c.id === id);
+      if (!conversation) return state;
+
+      const newPinned = !conversation.pinned;
+      const updatedConversations = state.conversations
+        .map((c) =>
+          c.id === id ? { ...c, pinned: newPinned, updatedAt: new Date() } : c
+        )
+        .sort((a, b) => {
+          // 置顶的排在前面，然后按更新时间排序
+          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
+
+      return { conversations: updatedConversations };
+    });
+  },
+
+  updateConversation: (id, updates) => {
+    set((state) => {
+      const updatedConversations = state.conversations
+        .map((c) => (c.id === id ? { ...c, ...updates } : c))
+        .sort((a, b) => {
+          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
+
+      return { conversations: updatedConversations };
+    });
+  },
 
   // Messages
   messages: {},

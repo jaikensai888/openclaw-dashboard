@@ -4,21 +4,45 @@ import { useState, useEffect } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MainContent } from '@/components/layout/MainContent';
 import { useChatStore } from '@/stores/chatStore';
+import { useWebSocket } from '@/hooks/useWebSocket';
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  const { currentConversationId, createConversation } = useChatStore();
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const { currentConversationId, createConversation, conversations, setCurrentConversation } = useChatStore();
+  const { loadHistory, switchConversation, createConversation: createConversationWS } = useWebSocket();
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    // Create initial conversation if none exists
-    if (mounted && !currentConversationId) {
-      createConversation();
+    // Load history on mount
+    if (mounted) {
+      loadHistory();
+      // Wait a bit for history to load
+      const timeout = setTimeout(() => {
+        setHistoryLoaded(true);
+      }, 500);
+      return () => clearTimeout(timeout);
     }
-  }, [mounted, currentConversationId, createConversation]);
+  }, [mounted, loadHistory]);
+
+  useEffect(() => {
+    // Handle initial conversation after history is loaded
+    if (mounted && historyLoaded) {
+      if (conversations.length > 0 && !currentConversationId) {
+        // Switch to the most recent conversation
+        const mostRecent = conversations[0];
+        setCurrentConversation(mostRecent.id);
+        switchConversation(mostRecent.id);
+      } else if (conversations.length === 0 && !currentConversationId) {
+        // No conversations exist, create a new one
+        const newId = createConversation();
+        createConversationWS(newId);
+      }
+    }
+  }, [mounted, historyLoaded, conversations, currentConversationId, createConversation, setCurrentConversation, switchConversation, createConversationWS]);
 
   if (!mounted) {
     return (

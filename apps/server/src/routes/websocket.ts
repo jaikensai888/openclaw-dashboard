@@ -77,6 +77,18 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
       handleTaskCancel(ws, payload as { taskId: string });
       break;
 
+    case 'history.load':
+      handleHistoryLoad(ws);
+      break;
+
+    case 'conversation.rename':
+      handleRenameConversation(ws, payload as { conversationId: string; title: string });
+      break;
+
+    case 'conversation.togglePin':
+      handleTogglePin(ws, payload as { conversationId: string });
+      break;
+
     default:
       sendError(ws, 'UNKNOWN_TYPE', `Unknown message type: ${type}`);
   }
@@ -87,7 +99,7 @@ async function handleCreateConversation(ws: WebSocket, payload: { id?: string; t
   const now = new Date().toISOString();
 
   run(
-    `INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+    `INSERT INTO conversations (id, title, pinned, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
     [conversationId, payload.title || null, now, now]
   );
 
@@ -99,6 +111,7 @@ async function handleCreateConversation(ws: WebSocket, payload: { id?: string; t
   send(ws, 'conversation.created', {
     id: conversationId,
     title: payload.title || null,
+    pinned: false,
     createdAt: now,
     updatedAt: now,
   });
@@ -237,6 +250,68 @@ async function handleTaskCancel(ws: WebSocket, payload: { taskId: string }) {
   broadcast('task.updated', {
     taskId,
     status: 'cancelled',
+  });
+}
+
+async function handleHistoryLoad(ws: WebSocket) {
+  const conversations = all<{
+    id: string;
+    title: string | null;
+    pinned: number;
+    created_at: string;
+    updated_at: string;
+  }>(`SELECT id, title, pinned, created_at, updated_at FROM conversations ORDER BY pinned DESC, updated_at DESC LIMIT 50`);
+
+  send(ws, 'history.conversations', {
+    conversations: conversations.map(c => ({
+      id: c.id,
+      title: c.title,
+      pinned: c.pinned === 1,
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+    })),
+  });
+}
+
+async function handleRenameConversation(ws: WebSocket, payload: { conversationId: string; title: string }) {
+  const { conversationId, title } = payload;
+
+  const existing = get<{ id: string }>(`SELECT id FROM conversations WHERE id = ?`, [conversationId]);
+  if (!existing) {
+    sendError(ws, 'NOT_FOUND', 'Conversation not found');
+    return;
+  }
+
+  const now = new Date().toISOString();
+  run(`UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?`, [title, now, conversationId]);
+
+  broadcast('conversation.updated', {
+    id: conversationId,
+    title,
+    updatedAt: now,
+  });
+}
+
+async function handleTogglePin(ws: WebSocket, payload: { conversationId: string }) {
+  const { conversationId } = payload;
+
+  const existing = get<{ id: string; pinned: number }>(
+    `SELECT id, pinned FROM conversations WHERE id = ?`,
+    [conversationId]
+  );
+  if (!existing) {
+    sendError(ws, 'NOT_FOUND', 'Conversation not found');
+    return;
+  }
+
+  const newPinned = existing.pinned === 1 ? 0 : 1;
+  const now = new Date().toISOString();
+  run(`UPDATE conversations SET pinned = ?, updated_at = ? WHERE id = ?`, [newPinned, now, conversationId]);
+
+  broadcast('conversation.updated', {
+    id: conversationId,
+    pinned: newPinned === 1,
+    updatedAt: now,
   });
 }
 

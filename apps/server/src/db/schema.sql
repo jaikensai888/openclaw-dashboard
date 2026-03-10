@@ -5,6 +5,7 @@
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,              -- UUID, format: conv_xxx
     title TEXT,                       -- Conversation title
+    pinned INTEGER DEFAULT 0,         -- 是否置顶 (0: 否, 1: 是)
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

@@ -1,13 +1,34 @@
 'use client';
 
-import { MessageSquare, Plus, Settings, Trash2, Menu, X } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 
 export function Sidebar() {
-  const { sidebarOpen, conversations, currentConversationId, setCurrentConversation, createConversation, deleteConversation, toggleSidebar } = useChatStore();
-  const { switchConversation, createConversation: createConversationWS } = useWebSocket();
+  const {
+    sidebarOpen,
+    conversations,
+    currentConversationId,
+    setCurrentConversation,
+    createConversation,
+    deleteConversation,
+    toggleSidebar,
+  } = useChatStore();
+  const { switchConversation, createConversation: createConversationWS, renameConversation, togglePinConversation } = useWebSocket();
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (editingId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
 
   const handleNewChat = () => {
     const id = createConversation();
@@ -15,6 +36,9 @@ export function Sidebar() {
   };
 
   const handleSelectConversation = (id: string) => {
+    // Don't switch if editing
+    if (editingId === id) return;
+
     setCurrentConversation(id);
     switchConversation(id);
     // Close sidebar on mobile after selecting conversation
@@ -26,6 +50,126 @@ export function Sidebar() {
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     deleteConversation(id);
+  };
+
+  const handleStartRename = (id: string, currentTitle: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(id);
+    setEditingTitle(currentTitle || '新对话');
+  };
+
+  const handleCancelRename = () => {
+    setEditingId(null);
+    setEditingTitle('');
+  };
+
+  const handleSaveRename = (id: string) => {
+    const trimmedTitle = editingTitle.trim();
+    if (trimmedTitle) {
+      renameConversation(id, trimmedTitle);
+    }
+    setEditingId(null);
+    setEditingTitle('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, id: string) => {
+    if (e.key === 'Enter') {
+      handleSaveRename(id);
+    } else if (e.key === 'Escape') {
+      handleCancelRename();
+    }
+  };
+
+  const handleTogglePin = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    togglePinConversation(id);
+  };
+
+  // Separate pinned and unpinned conversations
+  const pinnedConversations = conversations.filter((c) => c.pinned);
+  const unpinnedConversations = conversations.filter((c) => !c.pinned);
+
+  // Conversation item component
+  const ConversationItem = ({ conv }: { conv: { id: string; title?: string | null; pinned: boolean } }) => {
+    const isEditing = editingId === conv.id;
+
+    return (
+      <div
+        onClick={() => !isEditing && handleSelectConversation(conv.id)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => !isEditing && e.key === 'Enter' && handleSelectConversation(conv.id)}
+        className={cn(
+          'group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
+          conv.id === currentConversationId && !isEditing
+            ? 'bg-neutral-700'
+            : 'hover:bg-neutral-700/50'
+        )}
+      >
+        <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
+          <MessageSquare className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+          {isEditing ? (
+            <div className="flex items-center gap-1 flex-1" onClick={(e) => e.stopPropagation()}>
+              <input
+                ref={inputRef}
+                type="text"
+                value={editingTitle}
+                onChange={(e) => setEditingTitle(e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, conv.id)}
+                className="flex-1 bg-neutral-900 border border-primary-500 rounded px-2 py-1 text-sm focus:outline-none min-w-0"
+              />
+              <button
+                onClick={() => handleSaveRename(conv.id)}
+                className="p-1.5 hover:bg-neutral-600 rounded transition-colors"
+                aria-label="保存"
+              >
+                <Check className="w-4 h-4 text-green-500" />
+              </button>
+              <button
+                onClick={handleCancelRename}
+                className="p-1.5 hover:bg-neutral-600 rounded transition-colors"
+                aria-label="取消"
+              >
+                <X className="w-4 h-4 text-neutral-400" />
+              </button>
+            </div>
+          ) : (
+            <>
+              {conv.pinned && <Pin className="w-3 h-3 text-primary-500 flex-shrink-0" />}
+              <span className="truncate text-sm">{conv.title || '新对话'}</span>
+            </>
+          )}
+        </div>
+        {!isEditing && (
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => handleTogglePin(conv.id, e)}
+              className={cn(
+                'p-1.5 hover:bg-neutral-600 rounded transition-colors',
+                conv.pinned && 'opacity-100'
+              )}
+              aria-label={conv.pinned ? '取消置顶' : '置顶'}
+            >
+              <Pin className={cn('w-4 h-4', conv.pinned ? 'text-primary-500' : 'text-neutral-400')} />
+            </button>
+            <button
+              onClick={(e) => handleStartRename(conv.id, conv.title || '', e)}
+              className="p-1.5 hover:bg-neutral-600 rounded transition-colors"
+              aria-label="重命名"
+            >
+              <Pencil className="w-4 h-4 text-neutral-400" />
+            </button>
+            <button
+              onClick={(e) => handleDelete(conv.id, e)}
+              className="p-1.5 hover:bg-neutral-600 rounded transition-colors"
+              aria-label={`删除对话 ${conv.title || '新对话'}`}
+            >
+              <Trash2 className="w-4 h-4 text-neutral-400" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Mobile: Show hamburger menu when sidebar is closed
@@ -90,32 +234,25 @@ export function Sidebar() {
             </div>
           ) : (
             <div className="space-y-1">
-              {conversations.map((conv) => (
-                <div
-                  key={conv.id}
-                  onClick={() => handleSelectConversation(conv.id)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSelectConversation(conv.id)}
-                  className={cn(
-                    'group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
-                    conv.id === currentConversationId
-                      ? 'bg-neutral-700'
-                      : 'hover:bg-neutral-700/50'
+              {/* Pinned conversations */}
+              {pinnedConversations.length > 0 && (
+                <>
+                  <div className="px-3 py-2 text-xs text-neutral-500 font-medium">置顶</div>
+                  {pinnedConversations.map((conv) => (
+                    <ConversationItem key={conv.id} conv={conv} />
+                  ))}
+                  {unpinnedConversations.length > 0 && (
+                    <div className="my-2 border-t border-neutral-700" />
                   )}
-                >
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <MessageSquare className="w-4 h-4 text-neutral-400 flex-shrink-0" />
-                    <span className="truncate text-sm">{conv.title || '新对话'}</span>
-                  </div>
-                  <button
-                    onClick={(e) => handleDelete(conv.id, e)}
-                    className="opacity-0 group-hover:opacity-100 p-2 min-w-[44px] min-h-[44px] hover:bg-neutral-600 rounded transition-all focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    aria-label={`删除对话 ${conv.title || '新对话'}`}
-                  >
-                    <Trash2 className="w-4 h-4 text-neutral-400" />
-                  </button>
-                </div>
+                </>
+              )}
+
+              {/* Unpinned conversations */}
+              {unpinnedConversations.length > 0 && pinnedConversations.length > 0 && (
+                <div className="px-3 py-2 text-xs text-neutral-500 font-medium">对话</div>
+              )}
+              {unpinnedConversations.map((conv) => (
+                <ConversationItem key={conv.id} conv={conv} />
               ))}
             </div>
           )}

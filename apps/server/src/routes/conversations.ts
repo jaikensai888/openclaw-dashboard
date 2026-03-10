@@ -9,6 +9,7 @@ import { run, get, all } from '../db/index.js';
 interface ConversationRow {
   id: string;
   title: string | null;
+  pinned: number;
   created_at: string;
   updated_at: string;
 }
@@ -17,7 +18,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
   // List conversations
   fastify.get('/conversations', async (request, reply) => {
     const rows = all<ConversationRow>(
-      `SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 50`
+      `SELECT id, title, pinned, created_at, updated_at FROM conversations ORDER BY pinned DESC, updated_at DESC LIMIT 50`
     );
 
     return {
@@ -25,6 +26,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
       data: rows.map(row => ({
         id: row.id,
         title: row.title,
+        pinned: row.pinned === 1,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       })),
@@ -36,7 +38,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
     const { id } = request.params;
 
     const row = get<ConversationRow>(
-      `SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?`,
+      `SELECT id, title, pinned, created_at, updated_at FROM conversations WHERE id = ?`,
       [id]
     );
 
@@ -49,6 +51,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
       data: {
         id: row.id,
         title: row.title,
+        pinned: row.pinned === 1,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       },
@@ -62,7 +65,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
     const now = new Date().toISOString();
 
     run(
-      `INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO conversations (id, title, pinned, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
       [id, title || null, now, now]
     );
 
@@ -71,6 +74,7 @@ export async function conversationRoutes(fastify: FastifyInstance) {
       data: {
         id,
         title: title || null,
+        pinned: false,
         createdAt: now,
         updatedAt: now,
       },
@@ -78,14 +82,14 @@ export async function conversationRoutes(fastify: FastifyInstance) {
   });
 
   // Update conversation
-  fastify.put<{ Params: { id: string }; Body: { title?: string } }>(
+  fastify.put<{ Params: { id: string }; Body: { title?: string; pinned?: boolean } }>(
     '/conversations/:id',
     async (request, reply) => {
       const { id } = request.params;
-      const { title } = request.body || {};
+      const { title, pinned } = request.body || {};
 
       const existing = get<ConversationRow>(
-        `SELECT id FROM conversations WHERE id = ?`,
+        `SELECT id, title, pinned FROM conversations WHERE id = ?`,
         [id]
       );
 
@@ -94,16 +98,20 @@ export async function conversationRoutes(fastify: FastifyInstance) {
       }
 
       const now = new Date().toISOString();
+      const newTitle = title !== undefined ? title : existing.title;
+      const newPinned = pinned !== undefined ? (pinned ? 1 : 0) : existing.pinned;
+
       run(
-        `UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?`,
-        [title || null, now, id]
+        `UPDATE conversations SET title = ?, pinned = ?, updated_at = ? WHERE id = ?`,
+        [newTitle, newPinned, now, id]
       );
 
       return {
         success: true,
         data: {
           id,
-          title: title || null,
+          title: newTitle,
+          pinned: newPinned === 1,
           updatedAt: now,
         },
       };

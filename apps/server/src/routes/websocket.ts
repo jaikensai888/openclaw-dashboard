@@ -158,10 +158,10 @@ async function handleSwitchConversation(ws: WebSocket, payload: { conversationId
   });
 }
 
-async function handleChatSend(ws: WebSocket, payload: { conversationId: string; content: string }) {
-  const { conversationId, content } = payload;
+async function handleChatSend(ws: WebSocket, payload: { conversationId: string; content: string; tempId?: string }) {
+  const { conversationId, content, tempId } = payload;
 
-  console.log(`[WS] handleChatSend: conversationId=${conversationId}, content=${content}`);
+  console.log(`[WS] handleChatSend: conversationId=${conversationId}, content=${content}, tempId=${tempId}`);
 
   let conv = get<{ id: string }>(`SELECT id FROM conversations WHERE id = ?`, [conversationId]);
 
@@ -170,7 +170,7 @@ async function handleChatSend(ws: WebSocket, payload: { conversationId: string; 
     console.log(`[WS] Auto-creating conversation: ${conversationId}`);
     const now = new Date().toISOString();
     run(
-      `INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      `INSERT INTO conversations (id, title, pinned, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
       [conversationId, null, now, now]
     );
     conv = { id: conversationId };
@@ -193,6 +193,7 @@ async function handleChatSend(ws: WebSocket, payload: { conversationId: string; 
     role: 'user',
     content,
     messageType: 'text',
+    tempId,  // 回传给前端用于乐观更新匹配
     createdAt: now,
   });
 

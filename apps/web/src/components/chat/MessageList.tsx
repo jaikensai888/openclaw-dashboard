@@ -6,9 +6,16 @@ import type { Message } from '@openclaw-dashboard/shared';
 
 interface MessageListProps {
   messages: Message[];
+  onRetry?: (tempId: string) => void;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, onRetry }: MessageListProps) {
+  const handleRetry = (tempId: string) => {
+    if (onRetry) {
+      onRetry(tempId);
+    }
+  };
+
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       {messages.map((message) => {
@@ -24,7 +31,13 @@ export function MessageList({ messages }: MessageListProps) {
         }
 
         // Regular message
-        return <MessageItem key={message.id} message={message} />;
+        return (
+          <MessageItem
+            key={message.id}
+            message={message}
+            onRetry={handleRetry}
+          />
+        );
       })}
     </div>
   );

@@ -4,9 +4,11 @@ import { useRef, useEffect } from 'react';
 import { MessageList } from './MessageList';
 import { InputBar } from './InputBar';
 import { useChatStore } from '@/stores/chatStore';
+import { useWebSocket } from '@/hooks/useWebSocket';
 
 export function ChatPanel() {
   const { currentConversationId, messages, isStreaming, streamingContent } = useChatStore();
+  const { sendMessage } = useWebSocket();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const conversationMessages = currentConversationId
@@ -17,6 +19,15 @@ export function ChatPanel() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversationMessages.length, streamingContent]);
+
+  // Handle retry for failed messages
+  const handleRetry = (tempId: string, conversationId: string, content: string) => {
+    // 1. 更新本地状态为 pending
+    useChatStore.getState().retryMessage(tempId, conversationId, content);
+
+    // 2. 重新发送到服务器
+    sendMessage(conversationId, content);
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -31,7 +42,7 @@ export function ChatPanel() {
           </div>
         ) : (
           <>
-            <MessageList messages={conversationMessages} />
+            <MessageList messages={conversationMessages} onRetry={handleRetry} />
             {isStreaming && (
               <div className="flex gap-3 py-4">
                 <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-sm font-medium">

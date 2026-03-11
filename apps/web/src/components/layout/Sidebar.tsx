@@ -13,10 +13,9 @@ export function Sidebar() {
     currentConversationId,
     setCurrentConversation,
     createConversation,
-    deleteConversation,
     toggleSidebar,
   } = useChatStore();
-  const { switchConversation, createConversation: createConversationWS, renameConversation, togglePinConversation } = useWebSocket();
+  const { switchConversation, createConversation: createConversationWS, renameConversation, togglePinConversation, deleteConversation } = useWebSocket();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -117,16 +116,17 @@ export function Sidebar() {
                 onChange={(e) => setEditingTitle(e.target.value)}
                 onKeyDown={(e) => handleKeyDown(e, conv.id)}
                 className="flex-1 bg-neutral-900 border border-primary-500 rounded px-2 py-1 text-sm focus:outline-none min-w-0"
+                autoFocus
               />
               <button
-                onClick={() => handleSaveRename(conv.id)}
+                onClick={(e) => { e.stopPropagation(); handleSaveRename(conv.id); }}
                 className="p-1.5 hover:bg-neutral-600 rounded transition-colors"
                 aria-label="保存"
               >
                 <Check className="w-4 h-4 text-green-500" />
               </button>
               <button
-                onClick={handleCancelRename}
+                onClick={(e) => { e.stopPropagation(); handleCancelRename(); }}
                 className="p-1.5 hover:bg-neutral-600 rounded transition-colors"
                 aria-label="取消"
               >

@@ -89,6 +89,10 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
       handleTogglePin(ws, payload as { conversationId: string });
       break;
 
+    case 'conversation.delete':
+      handleDeleteConversation(ws, payload as { conversationId: string });
+      break;
+
     default:
       sendError(ws, 'UNKNOWN_TYPE', `Unknown message type: ${type}`);
   }
@@ -314,6 +318,23 @@ async function handleTogglePin(ws: WebSocket, payload: { conversationId: string 
     pinned: newPinned === 1,
     updatedAt: now,
   });
+}
+
+async function handleDeleteConversation(ws: WebSocket, payload: { conversationId: string }) {
+  const { conversationId } = payload;
+
+  const existing = get<{ id: string }>(`SELECT id FROM conversations WHERE id = ?`, [conversationId]);
+  if (!existing) {
+    sendError(ws, 'NOT_FOUND', 'Conversation not found');
+    return;
+  }
+
+  // Delete messages first (foreign key constraint)
+  run(`DELETE FROM messages WHERE conversation_id = ?`, [conversationId]);
+  // Delete conversation
+  run(`DELETE FROM conversations WHERE id = ?`, [conversationId]);
+
+  broadcast('conversation.deleted', { id: conversationId });
 }
 
 function setupPluginMessageHandlers() {

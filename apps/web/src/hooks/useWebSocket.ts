@@ -11,6 +11,12 @@ interface WSState {
   isConnecting: boolean;
 }
 
+// Queued message for when WebSocket is not connected
+interface QueuedMessage {
+  type: string;
+  payload: unknown;
+}
+
 // Global state managed outside React to prevent reconnection loops
 let globalState: WSState = {
   instance: null,
@@ -21,8 +27,50 @@ let globalState: WSState = {
 let reconnectTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let connectionCount = 0;
 
+// Message queue for when WebSocket is not connected
+const messageQueue: QueuedMessage[] = [];
+
+// Connection wait callbacks
+const connectionWaitCallbacks: (() => void)[] = [];
+
 function getWebSocket(): WebSocket | null {
   return globalState.instance;
+}
+
+// Notify all waiting callbacks that connection is established
+function notifyConnectionEstablished() {
+  while (connectionWaitCallbacks.length > 0) {
+    const callback = connectionWaitCallbacks.shift();
+    callback?.();
+  }
+}
+
+// Flush queued messages when connection is established
+function flushMessageQueue() {
+  if (globalState.instance?.readyState !== WebSocket.OPEN) return;
+
+  while (messageQueue.length > 0) {
+    const msg = messageQueue.shift();
+    if (msg) {
+      try {
+        globalState.instance.send(JSON.stringify(msg));
+        console.log('[WS] Flushed queued message:', msg.type);
+      } catch (error) {
+        console.error('[WS] Failed to send queued message:', error);
+      }
+    }
+  }
+}
+
+// Wait for WebSocket connection
+function waitForConnection(): Promise<void> {
+  return new Promise((resolve) => {
+    if (globalState.instance?.readyState === WebSocket.OPEN) {
+      resolve();
+    } else {
+      connectionWaitCallbacks.push(resolve);
+    }
+  });
 }
 
 // Single message handler - processes messages and updates store directly
@@ -77,6 +125,13 @@ function handleMessage(type: string, payload: unknown) {
       }
       break;
 
+    case 'conversation.deleted':
+      {
+        const { id } = payload as { id: string };
+        store.deleteConversation(id);
+      }
+      break;
+
     case 'history.messages':
       {
         const { conversationId, messages } = payload as {
@@ -97,6 +152,10 @@ function handleMessage(type: string, payload: unknown) {
         } else {
           // 其他消息（如 assistant 回复）正常添加
           store.addMessage(msg.conversationId, msg);
+          // Stop thinking when assistant message arrives
+          if (msg.role === 'assistant') {
+            store.stopThinking();
+          }
         }
       }
       break;
@@ -109,6 +168,8 @@ function handleMessage(type: string, payload: unknown) {
           done: boolean;
         };
         if (conversationId === store.currentConversationId) {
+          // Always stop thinking when any streaming event arrives
+          store.stopThinking();
           if (done) {
             store.clearStreaming();
           } else {
@@ -189,7 +250,17 @@ function handleMessage(type: string, payload: unknown) {
 }
 
 function connect() {
+  // Don't connect if already connecting or connected
   if (globalState.isConnecting || globalState.instance?.readyState === WebSocket.OPEN) return;
+
+  // Clean up any existing connection in non-OPEN state
+  if (globalState.instance && globalState.instance.readyState !== WebSocket.OPEN) {
+    globalState.instance.close();
+    globalState.instance = null;
+  }
+
+  // Clear any pending callbacks from previous connection attempts
+  connectionWaitCallbacks.length = 0;
 
   globalState.isConnecting = true;
 
@@ -201,6 +272,12 @@ function connect() {
       console.log('[WS] Connected to server');
       globalState.reconnectAttempts = 0;
       globalState.isConnecting = false;
+
+      // Notify waiting callbacks
+      notifyConnectionEstablished();
+
+      // Flush any queued messages
+      flushMessageQueue();
     };
 
     ws.onmessage = (event) => {
@@ -220,13 +297,17 @@ function connect() {
       globalState.instance = null;
       globalState.isConnecting = false;
 
-      // 标记所有 pending 消息为 failed
-      const store = useChatStore.getState();
-      for (const convId of Object.keys(store.messages)) {
-        const messages = store.messages[convId];
-        for (const msg of messages) {
-          if (msg.status === 'pending' && msg.tempId) {
-            store.failMessage(msg.tempId, '连接已断开');
+      // 只在异常断开时标记 pending 消息为 failed
+      // 1000 = 正常关闭, 1001 = 端点离开, 1005 = 无状态码
+      // 服务器重启或其他异常断开时会重连，消息会继续发送
+      if (event.code !== 1000 && event.code !== 1001 && event.code !== 1005) {
+        const store = useChatStore.getState();
+        for (const convId of Object.keys(store.messages)) {
+          const messages = store.messages[convId];
+          for (const msg of messages) {
+            if (msg.status === 'pending' && msg.tempId) {
+              store.failMessage(msg.tempId, '连接已断开');
+            }
           }
         }
       }
@@ -269,6 +350,8 @@ function disconnect() {
     globalState.instance = null;
   }
   globalState.isConnecting = false;
+  // Clear pending connection callbacks when disconnecting
+  connectionWaitCallbacks.length = 0;
 }
 
 function send(type: string, payload: unknown) {
@@ -279,7 +362,9 @@ function send(type: string, payload: unknown) {
       console.error('[WS] Failed to send message:', error);
     }
   } else {
-    console.warn('[WS] Cannot send - not connected');
+    // Queue message when not connected
+    console.log('[WS] Queuing message (not connected):', type);
+    messageQueue.push({ type, payload });
   }
 }
 
@@ -314,7 +399,10 @@ export function useWebSocket() {
       // 1. 先添加本地消息（乐观更新）
       const tempId = currentStore.addPendingMessage(conversationId, content);
 
-      // 2. 发送到服务器，带上 tempId
+      // 2. 开始计时等待 AI 响应
+      currentStore.startThinking();
+
+      // 3. 发送到服务器，带上 tempId
       send('chat.send', { conversationId, content, tempId });
 
       return tempId;
@@ -367,6 +455,13 @@ export function useWebSocket() {
     []
   );
 
+  const deleteConversation = useCallback((conversationId: string) => {
+    // Optimistic update
+    const store = useChatStore.getState();
+    store.deleteConversation(conversationId);
+    send('conversation.delete', { conversationId });
+  }, []);
+
   return {
     sendMessage,
     createConversation: createConversationWS,
@@ -375,6 +470,8 @@ export function useWebSocket() {
     loadHistory,
     renameConversation,
     togglePinConversation,
+    deleteConversation,
     isConnected: globalState.instance?.readyState === WebSocket.OPEN,
+    waitForConnection,
   };
 }

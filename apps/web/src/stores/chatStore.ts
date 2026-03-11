@@ -52,10 +52,12 @@ interface ChatState {
   // Conversations
   conversations: Conversation[];
   currentConversationId: string | null;
+  isHistoryLoaded: boolean;
   setCurrentConversation: (id: string) => void;
   createConversation: (title?: string) => string;
   deleteConversation: (id: string) => void;
   setConversations: (conversations: Conversation[]) => void;
+  setHistoryLoaded: (loaded: boolean) => void;
   renameConversation: (id: string, title: string) => void;
   togglePinConversation: (id: string) => void;
   updateConversation: (id: string, updates: Partial<Conversation>) => void;
@@ -86,6 +88,13 @@ interface ChatState {
   setIsStreaming: (streaming: boolean) => void;
   clearStreaming: () => void;
 
+  // Thinking (waiting for AI response)
+  thinkingStartTime: number | null;
+  isThinking: boolean;
+  startThinking: () => void;
+  stopThinking: () => void;
+  getThinkingDuration: () => number;
+
   // UI
   sidebarOpen: boolean;
   toggleSidebar: () => void;
@@ -97,6 +106,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Conversations
   conversations: [],
   currentConversationId: null,
+  isHistoryLoaded: false,
 
   setCurrentConversation: (id) => set({ currentConversationId: id }),
 
@@ -133,7 +143,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
-  setConversations: (conversations) => set({ conversations }),
+  setConversations: (conversations) => set({ conversations, isHistoryLoaded: true }),
+
+  setHistoryLoaded: (loaded) => set({ isHistoryLoaded: loaded }),
 
   renameConversation: (id, title) => {
     set((state) => ({
@@ -332,6 +344,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Streaming
   streamingContent: '',
   isStreaming: false,
+  thinkingStartTime: null as number | null,
+  isThinking: false,
 
   setStreamingContent: (content) => set({ streamingContent: content }),
 
@@ -341,7 +355,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setIsStreaming: (streaming) => set({ isStreaming: streaming }),
 
-  clearStreaming: () => set({ streamingContent: '', isStreaming: false }),
+  clearStreaming: () => set({ streamingContent: '', isStreaming: false, thinkingStartTime: null, isThinking: false }),
+
+  // Thinking (等待响应)
+  startThinking: () => set({ thinkingStartTime: Date.now(), isThinking: true }),
+
+  stopThinking: () => set({ thinkingStartTime: null, isThinking: false }),
+
+  getThinkingDuration: () => {
+    const state = get();
+    if (!state.thinkingStartTime) return 0;
+    return Math.floor((Date.now() - state.thinkingStartTime) / 1000);
+  },
 
   // UI
   sidebarOpen: true,

@@ -44,6 +44,9 @@ export async function initDatabase(config: DbConfig): Promise<SqlJsDatabase> {
   const schema = fs.readFileSync(schemaPath, 'utf-8');
   db.run(schema);
 
+  // Run migrations (for existing databases)
+  runMigrations(db);
+
   // Save initial state
   saveDatabase();
 
@@ -55,6 +58,24 @@ export function saveDatabase(): void {
     const data = db.export();
     const buffer = Buffer.from(data);
     fs.writeFileSync(dbPath, buffer);
+  }
+}
+
+/**
+ * Run database migrations for existing databases
+ */
+function runMigrations(database: SqlJsDatabase): void {
+  // Migration 1: Add pinned column to conversations if missing
+  try {
+    const columns = database.exec("PRAGMA table_info(conversations)");
+    const columnNames = columns[0]?.values?.map((v) => v[1] as string) || [];
+
+    if (!columnNames.includes('pinned')) {
+      console.log('[DB] Migration: Adding pinned column to conversations');
+      database.run("ALTER TABLE conversations ADD COLUMN pinned INTEGER DEFAULT 0");
+    }
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
   }
 }
 

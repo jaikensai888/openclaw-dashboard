@@ -18,6 +18,10 @@ interface Message {
   taskId?: string;
   metadata?: Record<string, unknown>;
   createdAt: Date;
+  // 乐观更新字段
+  status?: 'pending' | 'sent' | 'failed';
+  tempId?: string;
+  error?: string;
 }
 
 interface Task {
@@ -61,6 +65,11 @@ interface ChatState {
   addMessage: (conversationId: string, message: Message) => void;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
   setMessages: (conversationId: string, messages: Message[]) => void;
+  // 乐观更新 actions
+  addPendingMessage: (conversationId: string, content: string) => string;
+  confirmMessage: (tempId: string, serverMessage: Message) => void;
+  failMessage: (tempId: string, error: string) => void;
+  retryMessage: (tempId: string, conversationId: string, content: string) => void;
 
   // Tasks
   tasks: Record<string, Task>;
@@ -205,6 +214,93 @@ export const useChatStore = create<ChatState>((set, get) => ({
         [conversationId]: messages,
       },
     }));
+  },
+
+  // 乐观更新 actions
+  addPendingMessage: (conversationId, content) => {
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date();
+    const pendingMessage: Message = {
+      id: tempId,
+      conversationId,
+      role: 'user',
+      content,
+      messageType: 'text',
+      createdAt: now,
+      status: 'pending',
+      tempId,
+    };
+
+    set((state) => {
+      const existingMessages = state.messages[conversationId] || [];
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: [...existingMessages, pendingMessage],
+        },
+      };
+    });
+
+    return tempId;
+  },
+
+  confirmMessage: (tempId, serverMessage) => {
+    set((state) => {
+      const conversationId = serverMessage.conversationId;
+      const messages = state.messages[conversationId] || [];
+
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: messages.map((msg) =>
+            msg.tempId === tempId
+              ? { ...serverMessage, status: 'sent' }
+              : msg
+          ),
+        },
+      };
+    });
+  },
+
+  failMessage: (tempId, error) => {
+    set((state) => {
+      // 找到对应的消息
+      for (const conversationId of Object.keys(state.messages)) {
+        const messages = state.messages[conversationId];
+        const msgIndex = messages.findIndex((m) => m.tempId === tempId);
+        if (msgIndex !== -1) {
+          const updatedMessages = [...messages];
+          updatedMessages[msgIndex] = {
+            ...updatedMessages[msgIndex],
+            status: 'failed',
+            error,
+          };
+          return {
+            messages: {
+              ...state.messages,
+              [conversationId]: updatedMessages,
+            },
+          };
+        }
+      }
+      return state;
+    });
+  },
+
+  retryMessage: (tempId, conversationId, content) => {
+    set((state) => {
+      const messages = state.messages[conversationId] || [];
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: messages.map((msg) =>
+            msg.tempId === tempId
+              ? { ...msg, status: 'pending', error: undefined }
+              : msg
+          ),
+        },
+      };
+    });
   },
 
   // Tasks

@@ -39,6 +39,10 @@ export interface Message {
   taskId?: string;
   metadata?: Record<string, unknown>;
   createdAt: Date;
+  // 乐观更新字段
+  status?: 'pending' | 'sent' | 'failed';
+  tempId?: string;               // 临时 ID，用于乐观更新匹配
+  error?: string;                // 错误信息
 }
 
 export interface CreateMessageInput {

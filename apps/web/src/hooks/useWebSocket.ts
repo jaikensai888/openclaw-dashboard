@@ -90,7 +90,14 @@ function handleMessage(type: string, payload: unknown) {
     case 'chat.message':
       {
         const msg = payload as Message;
-        store.addMessage(msg.conversationId, msg);
+
+        // 如果是确认我们发送的消息（有 tempId 且是用户消息）
+        if (msg.tempId && msg.role === 'user') {
+          store.confirmMessage(msg.tempId, msg);
+        } else {
+          // 其他消息（如 assistant 回复）正常添加
+          store.addMessage(msg.conversationId, msg);
+        }
       }
       break;
 
@@ -213,6 +220,17 @@ function connect() {
       globalState.instance = null;
       globalState.isConnecting = false;
 
+      // 标记所有 pending 消息为 failed
+      const store = useChatStore.getState();
+      for (const convId of Object.keys(store.messages)) {
+        const messages = store.messages[convId];
+        for (const msg of messages) {
+          if (msg.status === 'pending' && msg.tempId) {
+            store.failMessage(msg.tempId, '连接已断开');
+          }
+        }
+      }
+
       // Don't reconnect if this was an intentional close
       if (event.code === 1000) return;
 
@@ -291,7 +309,15 @@ export function useWebSocket() {
 
   const sendMessage = useCallback(
     (conversationId: string, content: string) => {
-      send('chat.send', { conversationId, content });
+      const currentStore = useChatStore.getState();
+
+      // 1. 先添加本地消息（乐观更新）
+      const tempId = currentStore.addPendingMessage(conversationId, content);
+
+      // 2. 发送到服务器，带上 tempId
+      send('chat.send', { conversationId, content, tempId });
+
+      return tempId;
     },
     []
   );

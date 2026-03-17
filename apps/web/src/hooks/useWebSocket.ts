@@ -244,6 +244,73 @@ function handleMessage(type: string, payload: unknown) {
       // TODO: Show error notification to user
       break;
 
+    // Multi-Agent handlers
+    case 'agents.list':
+      {
+        const { agents } = payload as {
+          agents: Array<{
+            virtualAgentId: string;
+            displayName: string;
+            description?: string;
+            color?: string;
+            icon?: string;
+          }>;
+        };
+        store.setAvailableAgents(agents);
+      }
+      break;
+
+    case 'agent.active':
+      {
+        const { conversationId, agent } = payload as {
+          conversationId: string;
+          agent: {
+            virtualAgentId: string;
+            displayName: string;
+            description?: string;
+            color?: string;
+            icon?: string;
+          };
+        };
+        store.setActiveAgent(conversationId, agent);
+      }
+      break;
+
+    case 'agent.handoff':
+      {
+        const { conversationId, fromAgentId, toAgentId, reason } = payload as {
+          conversationId: string;
+          fromAgentId: string;
+          toAgentId: string;
+          reason?: string;
+        };
+
+        // Get target agent info
+        const toAgent = store.handleAgentHandoff({
+          conversationId,
+          fromAgentId,
+          toAgentId,
+          reason,
+        });
+
+        // Add system message about handoff
+        if (toAgent) {
+          const fromAgent = store.availableAgents.find(
+            (a) => a.virtualAgentId === fromAgentId
+          );
+          const handoffMessage = {
+            id: `handoff_${Date.now()}`,
+            conversationId,
+            role: 'assistant' as const,
+            content: `🔄 已从 **${fromAgent?.displayName || fromAgentId}** 移交给 **${toAgent.displayName}**${reason ? `：${reason}` : ''}`,
+            messageType: 'text' as const,
+            createdAt: new Date(),
+          };
+          store.addMessage(conversationId, handoffMessage);
+        }
+      }
+      break;
+
     default:
       console.warn('[WS] Unknown message type:', type);
   }
@@ -278,6 +345,9 @@ function connect() {
 
       // Flush any queued messages
       flushMessageQueue();
+
+      // Request available agents
+      send('agents.list', {});
     };
 
     ws.onmessage = (event) => {
@@ -462,12 +532,36 @@ export function useWebSocket() {
     send('conversation.delete', { conversationId });
   }, []);
 
+  const loadAgents = useCallback(() => {
+    send('agents.list', {});
+  }, []);
+
+  const sendMessageWithAgent = useCallback(
+    (conversationId: string, content: string, virtualAgentId?: string) => {
+      const currentStore = useChatStore.getState();
+
+      // 1. 先添加本地消息（乐观更新）
+      const tempId = currentStore.addPendingMessage(conversationId, content);
+
+      // 2. 开始计时等待 AI 响应
+      currentStore.startThinking();
+
+      // 3. 发送到服务器，带上 tempId 和可选的 virtualAgentId
+      send('chat.send', { conversationId, content, tempId, virtualAgentId });
+
+      return tempId;
+    },
+    []
+  );
+
   return {
     sendMessage,
+    sendMessageWithAgent,
     createConversation: createConversationWS,
     switchConversation,
     cancelTask,
     loadHistory,
+    loadAgents,
     renameConversation,
     togglePinConversation,
     deleteConversation,

@@ -9,7 +9,8 @@ import { run, get, all } from '../db/index.js';
 import { pluginManager } from '../services/pluginManager.js';
 import { messageParser } from '../services/messageParser.js';
 import { taskManager } from '../services/taskManager.js';
-import type { TaskType } from '@openclaw-dashboard/shared';
+import { getOrchestrator, type OrchestratorEvent } from '../services/orchestrator.js';
+import type { TaskType, WSChatSendWithAgentPayload, VirtualAgentId } from '@openclaw-dashboard/shared';
 
 interface ClientConnection {
   ws: WebSocket;
@@ -21,6 +22,9 @@ const clients = new Map<WebSocket, ClientConnection>();
 export async function websocketRoutes(fastify: FastifyInstance) {
   // Register plugin message handlers
   setupPluginMessageHandlers();
+
+  // Register orchestrator event handlers
+  setupOrchestratorHandlers();
 
   fastify.register(async function (fastify) {
     fastify.get('/ws', { websocket: true }, (socket: WebSocket) => {
@@ -70,7 +74,7 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
       break;
 
     case 'chat.send':
-      handleChatSend(ws, payload as { conversationId: string; content: string });
+      handleChatSend(ws, payload as { conversationId: string; content: string; virtualAgentId?: VirtualAgentId });
       break;
 
     case 'task.cancel':
@@ -91,6 +95,10 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
 
     case 'conversation.delete':
       handleDeleteConversation(ws, payload as { conversationId: string });
+      break;
+
+    case 'agents.list':
+      handleListAgents(ws);
       break;
 
     default:
@@ -162,10 +170,10 @@ async function handleSwitchConversation(ws: WebSocket, payload: { conversationId
   });
 }
 
-async function handleChatSend(ws: WebSocket, payload: { conversationId: string; content: string; tempId?: string }) {
-  const { conversationId, content, tempId } = payload;
+async function handleChatSend(ws: WebSocket, payload: { conversationId: string; content: string; tempId?: string; virtualAgentId?: VirtualAgentId }) {
+  const { conversationId, content, tempId, virtualAgentId } = payload;
 
-  console.log(`[WS] handleChatSend: conversationId=${conversationId}, content=${content}, tempId=${tempId}`);
+  console.log(`[WS] handleChatSend: conversationId=${conversationId}, content=${content}, tempId=${tempId}, virtualAgentId=${virtualAgentId}`);
 
   let conv = get<{ id: string }>(`SELECT id FROM conversations WHERE id = ?`, [conversationId]);
 
@@ -335,6 +343,12 @@ async function handleDeleteConversation(ws: WebSocket, payload: { conversationId
   run(`DELETE FROM conversations WHERE id = ?`, [conversationId]);
 
   broadcast('conversation.deleted', { id: conversationId });
+}
+
+async function handleListAgents(ws: WebSocket) {
+  const orchestrator = getOrchestrator();
+  const agents = orchestrator.getAvailableAgents();
+  send(ws, 'agents.list', { agents });
 }
 
 function setupPluginMessageHandlers() {
@@ -528,4 +542,80 @@ function broadcast(type: string, payload: unknown) {
       client.ws.send(message);
     }
   }
+}
+
+function setupOrchestratorHandlers() {
+  const orchestrator = getOrchestrator();
+
+  orchestrator.onEvent((event: OrchestratorEvent) => {
+    const { type, conversationId, data } = event;
+
+    switch (type) {
+      case 'agent.active':
+        broadcast('agent.active', data as { conversationId: string; agent: unknown });
+        break;
+
+      case 'agent.handoff':
+        broadcast('agent.handoff', {
+          conversationId,
+          ...(data as { fromAgentId: string; toAgentId: string; reason?: string }),
+        });
+        break;
+
+      case 'agent.streaming':
+        broadcast('chat.streaming', {
+          conversationId,
+          ...(data as { delta: string; done: boolean }),
+        });
+        break;
+
+      case 'agent.message':
+        {
+          const { content } = data as { content: string };
+          const messageId = `msg_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+          const now = new Date().toISOString();
+
+          run(
+            `INSERT INTO messages (id, conversation_id, role, content, message_type, created_at)
+             VALUES (?, ?, 'assistant', ?, 'text', ?)`,
+            [messageId, conversationId, content, now]
+          );
+
+          run(`UPDATE conversations SET updated_at = ? WHERE id = ?`, [now, conversationId]);
+
+          broadcast('chat.message', {
+            id: messageId,
+            conversationId,
+            role: 'assistant',
+            content,
+            messageType: 'text',
+            createdAt: now,
+          });
+        }
+        break;
+
+      case 'agent.error':
+        {
+          const { error } = data as { error: string };
+          const messageId = `msg_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+          const now = new Date().toISOString();
+
+          run(
+            `INSERT INTO messages (id, conversation_id, role, content, message_type, created_at)
+             VALUES (?, ?, 'assistant', ?, 'text', ?)`,
+            [messageId, conversationId, `[错误: ${error}]`, now]
+          );
+
+          broadcast('chat.message', {
+            id: messageId,
+            conversationId,
+            role: 'assistant',
+            content: `[错误: ${error}]`,
+            messageType: 'text',
+            createdAt: now,
+          });
+        }
+        break;
+    }
+  });
 }

@@ -211,3 +211,72 @@ export interface PaginatedResponse<T> {
   pageSize: number;
   hasMore: boolean;
 }
+
+// ------------------------------------------------------------
+// Multi-Agent Types
+// ------------------------------------------------------------
+
+/** Virtual Agent identifier */
+export type VirtualAgentId = string;
+
+/** Information about an active agent */
+export interface ActiveAgentInfo {
+  virtualAgentId: VirtualAgentId;
+  displayName: string;
+  description?: string;
+  /** Color for UI display (optional, e.g., '#0ea5e9') */
+  color?: string;
+  /** Icon name for UI display (optional) */
+  icon?: string;
+}
+
+/** Reference to a Gateway run */
+export interface GatewayRunRef {
+  /** Gateway run ID */
+  runId: string;
+  /** Associated virtual agent */
+  virtualAgentId: VirtualAgentId;
+  /** Associated conversation */
+  conversationId: string;
+}
+
+/** Handoff instruction parsed from agent output */
+export interface HandoffInstruction {
+  /** Agent initiating the handoff */
+  fromAgentId: VirtualAgentId;
+  /** Target agent for handoff */
+  toAgentId: VirtualAgentId;
+  /** Optional reason for handoff */
+  reason?: string;
+  /** Optional context to pass to target agent */
+  context?: string;
+}
+
+// ------------------------------------------------------------
+// Multi-Agent WebSocket Message Types
+// ------------------------------------------------------------
+
+/** Server -> Frontend: Agent activated for conversation */
+export type WSAgentActivePayload = {
+  conversationId: string;
+  agent: ActiveAgentInfo;
+};
+
+/** Server -> Frontend: Agent handoff event */
+export type WSAgentHandoffPayload = {
+  conversationId: string;
+  fromAgentId: VirtualAgentId;
+  toAgentId: VirtualAgentId;
+  reason?: string;
+};
+
+/** Frontend -> Server: Chat send with optional agent selection */
+export type WSChatSendWithAgentPayload = {
+  conversationId: string;
+  content: string;
+  /** Optional: specify which virtual agent to use */
+  virtualAgentId?: VirtualAgentId;
+};
+
+/** Handoff marker pattern for parsing agent output */
+export const HANDOFF_PATTERN = /^HANDOFF:(\w+)(?::(.+))?$/m;

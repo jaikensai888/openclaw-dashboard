@@ -5,9 +5,19 @@ import { MessageList } from './MessageList';
 import { InputBar } from './InputBar';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { Bot, ChevronDown } from 'lucide-react';
 
 export function ChatPanel() {
-  const { currentConversationId, messages, isStreaming, streamingContent, thinkingStartTime, isThinking } = useChatStore();
+  const {
+    currentConversationId,
+    messages,
+    isStreaming,
+    streamingContent,
+    thinkingStartTime,
+    isThinking,
+    availableAgents,
+    getCurrentAgent,
+  } = useChatStore();
 
   // Compute thinking duration in real-time
   const [thinkingDuration, setThinkingDuration] = useState(0);
@@ -52,6 +62,41 @@ export function ChatPanel() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Agent indicator bar */}
+      {currentConversationId && (
+        <div className="border-b border-neutral-700 px-4 py-2 flex items-center gap-2">
+          <Bot className="w-4 h-4 text-neutral-400" />
+          {(() => {
+            const currentAgent = getCurrentAgent(currentConversationId);
+            if (currentAgent) {
+              return (
+                <div className="flex items-center gap-2">
+                  <span
+                    className="px-2 py-0.5 rounded-full text-xs font-medium"
+                    style={{
+                      backgroundColor: currentAgent.color ? `${currentAgent.color}20` : '#0ea5e920',
+                      color: currentAgent.color || '#0ea5e9',
+                    }}
+                  >
+                    {currentAgent.displayName}
+                  </span>
+                  {currentAgent.description && (
+                    <span className="text-xs text-neutral-500">
+                      {currentAgent.description}
+                    </span>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <span className="text-xs text-neutral-500">
+                {availableAgents.length > 0 ? '选择一个 Agent 开始' : '正在加载...'}
+              </span>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-6">
         {conversationMessages.length === 0 ? (

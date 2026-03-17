@@ -12,33 +12,13 @@ import { taskRoutes } from './routes/tasks.js';
 import { websocketRoutes } from './routes/websocket.js';
 import { pluginRoutes } from './routes/plugin.js';
 import { pluginManager } from './services/pluginManager.js';
+import { createConfig, AppConfig } from './config.js';
 
-export interface AppConfig {
-  port: number;
-  host: string;
-  database: {
-    path: string;
-  };
-  plugin?: {
-    token?: string;
-  };
-}
-
-const defaultConfig: AppConfig = {
-  port: 3001,
-  host: '0.0.0.0',
-  database: {
-    path: './data/dashboard.db',
-  },
-};
+// Re-export config types for backward compatibility
+export type { AppConfig } from './config.js';
 
 export async function createApp(config: Partial<AppConfig> = {}) {
-  const finalConfig: AppConfig = {
-    ...defaultConfig,
-    ...config,
-    database: { ...defaultConfig.database, ...config.database },
-    plugin: { ...defaultConfig.plugin, ...config.plugin },
-  };
+  const finalConfig = createConfig(config);
 
   // Initialize database
   await initDatabase(finalConfig.database);

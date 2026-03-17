@@ -48,6 +48,22 @@ interface TaskOutput {
   createdAt: Date;
 }
 
+// Multi-Agent Types
+interface ActiveAgentInfo {
+  virtualAgentId: string;
+  displayName: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+}
+
+interface HandoffEvent {
+  conversationId: string;
+  fromAgentId: string;
+  toAgentId: string;
+  reason?: string;
+}
+
 interface ChatState {
   // Conversations
   conversations: Conversation[];
@@ -100,6 +116,14 @@ interface ChatState {
   toggleSidebar: () => void;
   taskModalTaskId: string | null;
   setTaskModalTaskId: (id: string | null) => void;
+
+  // Multi-Agent
+  availableAgents: ActiveAgentInfo[];
+  currentAgentByConversation: Record<string, ActiveAgentInfo>;
+  setAvailableAgents: (agents: ActiveAgentInfo[]) => void;
+  setActiveAgent: (conversationId: string, agent: ActiveAgentInfo) => void;
+  handleAgentHandoff: (handoff: HandoffEvent) => ActiveAgentInfo | null;
+  getCurrentAgent: (conversationId: string) => ActiveAgentInfo | null;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -376,7 +400,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
   taskModalTaskId: null,
 
   setTaskModalTaskId: (id) => set({ taskModalTaskId: id }),
+
+  // Multi-Agent
+  availableAgents: [],
+  currentAgentByConversation: {},
+
+  setAvailableAgents: (agents) => set({ availableAgents: agents }),
+
+  setActiveAgent: (conversationId, agent) => set((state) => ({
+    currentAgentByConversation: {
+      ...state.currentAgentByConversation,
+      [conversationId]: agent,
+    },
+  })),
+
+  handleAgentHandoff: (handoff) => {
+    const state = get();
+    const toAgent = state.availableAgents.find(
+      (a) => a.virtualAgentId === handoff.toAgentId
+    );
+
+    if (toAgent) {
+      set({
+        currentAgentByConversation: {
+          ...state.currentAgentByConversation,
+          [handoff.conversationId]: toAgent,
+        },
+      });
+    }
+
+    return toAgent || null;
+  },
+
+  getCurrentAgent: (conversationId) => {
+    const state = get();
+    return state.currentAgentByConversation[conversationId] || null;
+  },
 }));
 
 // Export types for use in other files
-export type { Conversation, Message, Task, TaskOutput };
+export type { Conversation, Message, Task, TaskOutput, ActiveAgentInfo, HandoffEvent };

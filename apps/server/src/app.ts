@@ -13,6 +13,8 @@ import { websocketRoutes } from './routes/websocket.js';
 import { pluginRoutes } from './routes/plugin.js';
 import { pluginManager } from './services/pluginManager.js';
 import { createConfig, AppConfig } from './config.js';
+import { initGatewayClient, getGatewayClient } from './services/openclawGatewayClient.js';
+import { initOrchestrator, getOrchestrator } from './services/orchestrator.js';
 
 // Re-export config types for backward compatibility
 export type { AppConfig } from './config.js';
@@ -23,6 +25,29 @@ export async function createApp(config: Partial<AppConfig> = {}) {
   // Initialize database
   await initDatabase(finalConfig.database);
   console.log(`[DB] Database initialized at ${finalConfig.database.path}`);
+
+  // Initialize Gateway client and Orchestrator if configured
+  if (finalConfig.openclawGateway) {
+    const gatewayClient = initGatewayClient(finalConfig);
+    if (gatewayClient) {
+      console.log(`[Gateway] Initializing connection to ${finalConfig.openclawGateway.url}...`);
+      try {
+        await gatewayClient.start();
+        console.log('[Gateway] Connected successfully');
+
+        // Initialize orchestrator
+        initOrchestrator();
+        console.log('[Orchestrator] Initialized with Gateway connection');
+      } catch (error) {
+        console.error('[Gateway] Failed to connect:', error);
+        console.log('[Gateway] Falling back to plugin mode');
+      }
+    }
+  } else {
+    // Still initialize orchestrator for plugin mode
+    initOrchestrator();
+    console.log('[Orchestrator] Initialized in plugin mode');
+  }
 
   // Create Fastify app
   const fastify = Fastify({

@@ -14,6 +14,7 @@
     "@fastify/cors": "^9.0.0",
     "@fastify/websocket": "^10.0.0",
     "@openclaw-dashboard/shared": "workspace:*",
+    "dotenv": "^17.3.1",
     "fastify": "^4.26.0",
     "sql.js": "^1.10.0",
     "uuid": "^9.0.0",

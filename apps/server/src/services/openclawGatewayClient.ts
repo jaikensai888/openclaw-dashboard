@@ -27,12 +27,12 @@ interface GatewayResponse {
 interface GatewayEvent {
   type: 'event';
   event: string;
-  data: Record<string, unknown>;
+  payload: Record<string, unknown>;
 }
 
 interface ConnectChallengeEvent {
-  challenge: string;
-  protocol: { min: number; max: number };
+  nonce: string;
+  ts: number;
 }
 
 export interface AgentEvent {
@@ -220,15 +220,17 @@ export class OpenclawGatewayClient {
 
   private handleMessage(data: WebSocket.RawData, connectResolve?: () => void): void {
     try {
-      const message = JSON.parse(data.toString());
+      const rawMessage = data.toString();
+      console.log('[Gateway] Raw message:', rawMessage);
+      const message = JSON.parse(rawMessage);
 
       if (message.type === 'event') {
         const event = message as GatewayEvent;
 
         if (event.event === 'connect.challenge') {
-          this.handleChallenge(event.data as unknown as ConnectChallengeEvent, connectResolve);
+          this.handleChallenge(event.payload as unknown as ConnectChallengeEvent, connectResolve);
         } else if (event.event === 'agent') {
-          this.handleAgentEvent(event.data as unknown as AgentEvent);
+          this.handleAgentEvent(event.payload as unknown as AgentEvent);
         }
       } else if (message.type === 'res') {
         this.handleResponse(message as GatewayResponse);
@@ -239,19 +241,22 @@ export class OpenclawGatewayClient {
   }
 
   private handleChallenge(challenge: ConnectChallengeEvent, resolve?: () => void): void {
-    console.log('[Gateway] Received challenge, sending connect request...');
+    console.log('[Gateway] Received challenge with nonce:', challenge.nonce);
+    console.log('[Gateway] Sending connect request...');
 
-    // Send connect request
+    // Send connect request matching Openclaw Gateway protocol
+    // Values from paperclip adapter: clientId=gateway-client, clientMode=backend, protocol=3
     const connectParams = {
-      minProtocol: challenge.protocol.min,
-      maxProtocol: challenge.protocol.max,
+      minProtocol: 3,
+      maxProtocol: 3,
       client: {
-        id: 'openclaw-dashboard',
+        id: 'gateway-client',
+        mode: 'backend',
         version: '1.0.0',
         platform: 'node',
       },
       role: 'operator',
-      scopes: ['agent', 'agent.wait'],
+      scopes: ['agent', 'agent.wait', 'operator.admin'],
       auth: {
         token: this.options.token,
       },
@@ -387,8 +392,8 @@ export function createGatewayClient(config: AppConfig): OpenclawGatewayClient | 
   return new OpenclawGatewayClient({
     url: config.openclawGateway.url,
     token: config.openclawGateway.token,
-    reconnectInterval: config.openclawGateway.reconnectInterval,
-    connectionTimeout: config.openclawGateway.connectionTimeout,
+    ...(config.openclawGateway.reconnectInterval ? { reconnectInterval: config.openclawGateway.reconnectInterval } : {}),
+    ...(config.openclawGateway.connectionTimeout ? { connectionTimeout: config.openclawGateway.connectionTimeout } : {}),
   });
 }
 

@@ -47,6 +47,9 @@ export async function initDatabase(config: DbConfig): Promise<SqlJsDatabase> {
   // Run migrations (for existing databases)
   runMigrations(db);
 
+  // Seed default data
+  seedDefaultExperts();
+
   // Save initial state
   saveDatabase();
 
@@ -214,4 +217,79 @@ export function all<T = unknown>(sql: string, params: (string | number | null | 
 
   stmt.free();
   return results;
+}
+
+/**
+ * Seed default experts if none exist
+ */
+export function seedDefaultExperts(): void {
+  const count = get<{ count: number }>('SELECT COUNT(*) as count FROM experts');
+  if (count && count.count > 0) {
+    return; // Already seeded
+  }
+
+  console.log('[DB] Seeding default experts...');
+  const now = new Date().toISOString();
+
+  const defaultExperts = [
+    {
+      id: 'expert_claw_default',
+      name: 'Claw',
+      avatar: null,
+      title: '智能助手',
+      description: '通用智能助手，可以处理各种日常任务和问题',
+      category: '通用',
+      system_prompt: '你是 Claw，一个友好、专业的智能助手。你乐于助人，回答准确，并且始终保持积极的态度。',
+      color: '#0ea5e9',
+      icon: 'bot',
+      is_default: 1,
+    },
+    {
+      id: 'expert_kai_content',
+      name: 'Kai',
+      avatar: null,
+      title: '内容创作专家',
+      description: '专注于内容创作，包括文案、文章、创意写作等',
+      category: '内容',
+      system_prompt: '你是 Kai，一位资深的内容创作专家。你擅长各种类型的文案创作，从商业文案到创意写作，都能精准把握用户需求，产出高质量内容。',
+      color: '#22c55e',
+      icon: 'pen-tool',
+      is_default: 0,
+    },
+    {
+      id: 'expert_phoebe_data',
+      name: 'Phoebe',
+      avatar: null,
+      title: '数据分析专家',
+      description: '专注于数据分析和可视化，帮助理解复杂数据',
+      category: '数据',
+      system_prompt: '你是 Phoebe，一位专业的数据分析专家。你擅长数据清洗、统计分析和数据可视化，能够将复杂的数据转化为清晰的洞察和建议。',
+      color: '#f59e0b',
+      icon: 'bar-chart-2',
+      is_default: 0,
+    },
+  ];
+
+  for (const expert of defaultExperts) {
+    run(
+      `INSERT INTO experts (id, name, avatar, title, description, category, system_prompt, color, icon, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        expert.id,
+        expert.name,
+        expert.avatar,
+        expert.title,
+        expert.description,
+        expert.category,
+        expert.system_prompt,
+        expert.color,
+        expert.icon,
+        expert.is_default,
+        now,
+        now,
+      ]
+    );
+  }
+
+  console.log('[DB] Default experts seeded');
 }

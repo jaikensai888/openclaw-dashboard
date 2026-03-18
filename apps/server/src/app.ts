@@ -9,6 +9,7 @@ import { initDatabase, closeDatabase } from './db/index.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { messageRoutes } from './routes/messages.js';
 import { taskRoutes } from './routes/tasks.js';
+import { artifactRoutes } from './routes/artifacts.js';
 import { websocketRoutes } from './routes/websocket.js';
 import { pluginRoutes } from './routes/plugin.js';
 import { pluginManager } from './services/pluginManager.js';
@@ -118,6 +119,7 @@ export async function createApp(config: Partial<AppConfig> = {}) {
     api.register(conversationRoutes);
     api.register(messageRoutes);
     api.register(taskRoutes);
+    api.register(artifactRoutes);
   }, { prefix: '/api/v1' });
 
   // WebSocket routes

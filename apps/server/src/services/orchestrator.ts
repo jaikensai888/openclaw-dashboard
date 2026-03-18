@@ -17,6 +17,7 @@ import {
   getDefaultVirtualAgent,
   toActiveAgentInfo,
   isValidAgentId,
+  listVirtualAgents,
   type VirtualAgent,
 } from './virtualAgents.js';
 import {
@@ -194,7 +195,6 @@ export class Orchestrator {
    * Get available agents
    */
   getAvailableAgents(): ActiveAgentInfo[] {
-    const { listVirtualAgents } = require('./virtualAgents.js');
     return listVirtualAgents().map(toActiveAgentInfo);
   }
 

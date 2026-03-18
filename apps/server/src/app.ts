@@ -76,6 +76,18 @@ export async function createApp(config: Partial<AppConfig> = {}) {
     timestamp: new Date().toISOString(),
   }));
 
+  // Debug: Gateway connection status
+  fastify.get('/api/debug/gateway', async () => {
+    const gatewayClient = getGatewayClient();
+    return {
+      gatewayConfigured: !!finalConfig.openclawGateway,
+      gatewayUrl: finalConfig.openclawGateway?.url || null,
+      gatewayConnected: gatewayClient?.isConnected() ?? false,
+      gatewayStatus: gatewayClient?.getStatus() ?? 'not_initialized',
+      timestamp: new Date().toISOString(),
+    };
+  });
+
   // Debug: Test send message to plugin
   fastify.post('/api/debug/test-plugin', async (request) => {
     const body = request.body as { content?: string } | undefined;

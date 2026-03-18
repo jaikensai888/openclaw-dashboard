@@ -21,6 +21,7 @@ interface GatewayResponse {
   id: string;
   ok: boolean;
   result?: unknown;
+  payload?: unknown;  // Gateway uses 'payload' instead of 'result'
   error?: { code: string; message: string };
 }
 
@@ -37,15 +38,20 @@ interface ConnectChallengeEvent {
 
 export interface AgentEvent {
   runId: string;
-  stream?: 'start' | 'delta' | 'end';
+  stream?: 'lifecycle' | 'assistant' | 'start' | 'delta' | 'end';  // Include both Gateway and internal formats
   data?: {
-    delta?: string;
-    content?: string;
+    phase?: 'start' | 'end';  // for lifecycle events (Gateway format)
+    text?: string;            // for assistant events - full text (Gateway format)
+    delta?: string;           // for assistant/delta events - incremental
+    content?: string;         // accumulated content
     done?: boolean;
   };
 }
 
 type AgentEventHandler = (event: AgentEvent) => void;
+
+// Track accumulated content per runId for end events
+const runContentMap = new Map<string, string>();
 
 export interface RunAgentOptions {
   conversationId: string;
@@ -145,19 +151,24 @@ export class OpenclawGatewayClient {
       throw new Error('Not connected to gateway');
     }
 
-    const messages = [
-      { role: 'system' as const, content: options.systemPrompt },
-      ...(options.history || []),
-      { role: 'user' as const, content: options.userMessage },
-    ];
+    // Build the message with conversation history context
+    let messageContent = options.userMessage;
+    if (options.history && options.history.length > 0) {
+      const historyContext = options.history
+        .map(m => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`)
+        .join('\n');
+      messageContent = `历史对话:\n${historyContext}\n\n当前消息: ${options.userMessage}`;
+    }
+
+    // Include system prompt in the message if provided
+    if (options.systemPrompt) {
+      messageContent = `[系统指令: ${options.systemPrompt}]\n\n${messageContent}`;
+    }
 
     const result = await this.sendRequest('agent', {
-      messages,
-      model: options.model,
-      metadata: {
-        conversationId: options.conversationId,
-        virtualAgentId: options.virtualAgentId,
-      },
+      idempotencyKey: `dash_${options.conversationId}_${Date.now()}`,
+      to: 'dashboard',
+      message: messageContent,
     });
 
     return result as { runId: string };
@@ -226,10 +237,12 @@ export class OpenclawGatewayClient {
 
       if (message.type === 'event') {
         const event = message as GatewayEvent;
+        console.log('[Gateway] Received event:', event.event);
 
         if (event.event === 'connect.challenge') {
           this.handleChallenge(event.payload as unknown as ConnectChallengeEvent, connectResolve);
         } else if (event.event === 'agent') {
+          console.log('[Gateway] Dispatching agent event to handlers');
           this.handleAgentEvent(event.payload as unknown as AgentEvent);
         }
       } else if (message.type === 'res') {
@@ -245,18 +258,18 @@ export class OpenclawGatewayClient {
     console.log('[Gateway] Sending connect request...');
 
     // Send connect request matching Openclaw Gateway protocol
-    // Values from paperclip adapter: clientId=gateway-client, clientMode=backend, protocol=3
+    // client.id must be "cli" and client.mode must be "backend" for Gateway to accept
     const connectParams = {
       minProtocol: 3,
       maxProtocol: 3,
       client: {
-        id: 'gateway-client',
+        id: 'cli',
         mode: 'backend',
         version: '1.0.0',
         platform: 'node',
       },
       role: 'operator',
-      scopes: ['agent', 'agent.wait', 'operator.admin'],
+      scopes: ['operator.read', 'operator.write', 'agent', 'agent.wait'],
       auth: {
         token: this.options.token,
       },
@@ -276,9 +289,58 @@ export class OpenclawGatewayClient {
   }
 
   private handleAgentEvent(event: AgentEvent): void {
+    // Convert Gateway event format to internal format expected by orchestrator
+    let convertedEvent: AgentEvent;
+
+    if (event.stream === 'lifecycle') {
+      const phase = event.data?.phase;
+
+      if (phase === 'start') {
+        convertedEvent = {
+          runId: event.runId,
+          stream: 'start',
+        };
+        // Initialize content tracking
+        runContentMap.set(event.runId, '');
+      } else if (phase === 'end') {
+        // Get accumulated content
+        const content = runContentMap.get(event.runId) || '';
+        convertedEvent = {
+          runId: event.runId,
+          stream: 'end',
+          data: {
+            content,
+            done: true,
+          },
+        };
+        // Clean up
+        runContentMap.delete(event.runId);
+      } else {
+        convertedEvent = event;
+      }
+    } else if (event.stream === 'assistant') {
+      const text = event.data?.text || event.data?.delta || '';
+      // Accumulate content
+      const currentContent = runContentMap.get(event.runId) || '';
+      runContentMap.set(event.runId, currentContent + text);
+
+      convertedEvent = {
+        runId: event.runId,
+        stream: 'delta',
+        data: {
+          delta: text,
+          content: currentContent + text,
+        },
+      };
+    } else {
+      convertedEvent = event;
+    }
+
+    console.log('[Gateway] Converted event:', JSON.stringify(convertedEvent));
+
     for (const handler of this.agentEventHandlers) {
       try {
-        handler(event);
+        handler(convertedEvent);
       } catch (error) {
         console.error('[Gateway] Agent event handler error:', error);
       }
@@ -295,7 +357,8 @@ export class OpenclawGatewayClient {
     this.pendingRequests.delete(response.id);
 
     if (response.ok) {
-      pending.resolve(response.result);
+      // Gateway uses 'payload' field, fallback to 'result' for compatibility
+      pending.resolve(response.payload ?? response.result);
     } else {
       pending.reject(new Error(response.error?.message || 'Unknown error'));
     }

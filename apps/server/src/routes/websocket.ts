@@ -10,6 +10,7 @@ import { pluginManager } from '../services/pluginManager.js';
 import { messageParser } from '../services/messageParser.js';
 import { taskManager } from '../services/taskManager.js';
 import { getOrchestrator, type OrchestratorEvent } from '../services/orchestrator.js';
+import { getGatewayClient } from '../services/openclawGatewayClient.js';
 import type { TaskType, WSChatSendWithAgentPayload, VirtualAgentId } from '@openclaw-dashboard/shared';
 
 interface ClientConnection {
@@ -209,7 +210,28 @@ async function handleChatSend(ws: WebSocket, payload: { conversationId: string; 
     createdAt: now,
   });
 
-  // Forward to plugin
+  // Try Gateway/Orchestrator first
+  const orchestrator = getOrchestrator();
+  const gatewayClient = getGatewayClient();
+  const gatewayConnected = gatewayClient?.isConnected();
+
+  if (gatewayConnected) {
+    console.log(`[WS] Using Gateway connection`);
+    const result = await orchestrator.handleUserMessage({
+      conversationId,
+      content,
+      virtualAgentId,
+    });
+
+    if (result.error) {
+      console.log(`[WS] Gateway error: ${result.error}, falling back to plugin`);
+    } else {
+      console.log(`[WS] Gateway accepted, runId: ${result.runId}`);
+      return;
+    }
+  }
+
+  // Fallback to plugin mode
   const accountIds = pluginManager.getConnectedAccountIds();
   console.log(`[WS] Connected plugin accounts: ${accountIds.length > 0 ? accountIds.join(', ') : 'none'}`);
 

@@ -4,6 +4,7 @@ import { useState, useRef, KeyboardEvent } from 'react';
 import { Send, Loader2, X } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { RoleSelector } from './RoleSelector';
 
 const MAX_MESSAGE_LENGTH = 10000;
 
@@ -70,6 +71,7 @@ export function InputBar() {
         输入消息
       </label>
       <div className="relative flex items-end bg-neutral-800 rounded-xl border border-neutral-700 focus-within:border-neutral-600 transition-colors">
+        <RoleSelector />
         <textarea
           ref={textareaRef}
           id="message-input"

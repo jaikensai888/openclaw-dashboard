@@ -103,7 +103,7 @@ export function ChatPanel() {
           <button
             onClick={toggleArtifactsPanel}
             className={cn(
-              'p-2 rounded-lg transition-colors',
+              'p-2 min-w-[44px] min-h-[44px] rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
               artifactsPanelOpen
                 ? 'bg-primary-600 text-white'
                 : 'hover:bg-neutral-700 text-neutral-400'

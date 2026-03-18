@@ -75,7 +75,7 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
       break;
 
     case 'chat.send':
-      handleChatSend(ws, payload as { conversationId: string; content: string; virtualAgentId?: VirtualAgentId });
+      handleChatSend(ws, payload as { conversationId: string; content: string; virtualAgentId?: VirtualAgentId; tempId?: string; expertId?: string });
       break;
 
     case 'task.cancel':
@@ -171,8 +171,14 @@ async function handleSwitchConversation(ws: WebSocket, payload: { conversationId
   });
 }
 
-async function handleChatSend(ws: WebSocket, payload: { conversationId: string; content: string; tempId?: string; virtualAgentId?: VirtualAgentId }) {
-  const { conversationId, content, tempId, virtualAgentId } = payload;
+async function handleChatSend(ws: WebSocket, payload: {
+  conversationId: string;
+  content: string;
+  tempId?: string;
+  virtualAgentId?: VirtualAgentId;
+  expertId?: string;  // 新增
+}) {
+  const { conversationId, content, tempId, virtualAgentId, expertId } = payload;
 
   console.log(`[WS] handleChatSend: conversationId=${conversationId}, content=${content}, tempId=${tempId}, virtualAgentId=${virtualAgentId}`);
 
@@ -215,12 +221,26 @@ async function handleChatSend(ws: WebSocket, payload: { conversationId: string; 
   const gatewayClient = getGatewayClient();
   const gatewayConnected = gatewayClient?.isConnected();
 
+  // 查询 expert 的 systemPrompt
+  let expertSystemPrompt: string | undefined;
+  if (expertId) {
+    const expert = get<{ system_prompt: string }>(
+      'SELECT system_prompt FROM experts WHERE id = ?',
+      [expertId]
+    );
+    if (expert) {
+      expertSystemPrompt = expert.system_prompt;
+      console.log(`[WS] Using expert systemPrompt for ${expertId}`);
+    }
+  }
+
   if (gatewayConnected) {
     console.log(`[WS] Using Gateway connection`);
     const result = await orchestrator.handleUserMessage({
       conversationId,
       content,
       virtualAgentId,
+      expertSystemPrompt,  // 新增
     });
 
     if (result.error) {

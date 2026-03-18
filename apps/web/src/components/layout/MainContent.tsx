@@ -1,8 +1,9 @@
 'use client';
 
 import { ChatPanel } from '@/components/chat/ChatPanel';
+import { ExpertCenter } from '@/components/expert/ExpertCenter';
 import { useChatStore } from '@/stores/chatStore';
-import { Sparkles, Users, Clock } from 'lucide-react';
+import { Sparkles, Clock } from 'lucide-react';
 
 export function MainContent() {
   const { currentConversationId, currentView } = useChatStore();
@@ -11,23 +12,7 @@ export function MainContent() {
   const renderView = () => {
     switch (currentView) {
       case 'expert':
-        return (
-          <main id="main-content" className="flex-1 flex flex-col bg-neutral-900" role="main">
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center text-neutral-500 max-w-md px-4">
-                <div className="mb-6">
-                  <Users className="w-16 h-16 mx-auto mb-4 text-primary-500 opacity-50" aria-hidden="true" />
-                </div>
-                <h1 className="text-2xl font-semibold mb-3 text-neutral-200">
-                  专家中心
-                </h1>
-                <p className="text-sm mb-6">
-                  按行业分类浏览专家，召唤他们为你服务
-                </p>
-              </div>
-            </div>
-          </main>
-        );
+        return <ExpertCenter />;
       case 'automation':
         return (
           <main id="main-content" className="flex-1 flex flex-col bg-neutral-900" role="main">

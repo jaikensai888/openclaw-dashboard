@@ -1,10 +1,43 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check, Search, Bot, Users, Clock } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
+
+// 导航项组件
+function NavItem({
+  icon: Icon,
+  label,
+  isActive,
+  onClick,
+  badge
+}: {
+  icon: React.ElementType;
+  label: string;
+  isActive: boolean;
+  onClick: () => void;
+  badge?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
+        isActive ? 'bg-primary-600 text-white' : 'hover:bg-neutral-700 text-neutral-300'
+      )}
+    >
+      <Icon className="w-5 h-5" />
+      <span className="flex-1 text-left text-sm">{label}</span>
+      {badge && (
+        <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-600 text-neutral-300">
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
 
 export function Sidebar() {
   const {
@@ -14,6 +47,10 @@ export function Sidebar() {
     setCurrentConversation,
     createConversation,
     toggleSidebar,
+    currentView,
+    setCurrentView,
+    searchQuery,
+    setSearchQuery,
   } = useChatStore();
   const { switchConversation, createConversation: createConversationWS, renameConversation, togglePinConversation, deleteConversation } = useWebSocket();
 
@@ -84,9 +121,12 @@ export function Sidebar() {
     togglePinConversation(id);
   };
 
-  // Separate pinned and unpinned conversations
-  const pinnedConversations = conversations.filter((c) => c.pinned);
-  const unpinnedConversations = conversations.filter((c) => !c.pinned);
+  // 过滤会话列表
+  const filteredConversations = conversations.filter((c) =>
+    !searchQuery || (c.title?.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+  const pinnedConversations = filteredConversations.filter((c) => c.pinned);
+  const unpinnedConversations = filteredConversations.filter((c) => !c.pinned);
 
   // Conversation item component
   const ConversationItem = ({ conv }: { conv: { id: string; title?: string | null; pinned: boolean } }) => {
@@ -215,6 +255,29 @@ export function Sidebar() {
           </div>
         </div>
 
+        {/* Search - 新增 */}
+        <div className="px-3 py-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索任务..."
+              className="w-full bg-neutral-900 border border-neutral-700 rounded-lg pl-9 pr-3 py-2 text-sm placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
+                aria-label="清除搜索"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="p-4">
           <button
             onClick={handleNewChat}
@@ -225,12 +288,37 @@ export function Sidebar() {
           </button>
         </div>
 
+        {/* Navigation - 新增 */}
+        <div className="px-3 py-2 space-y-1 border-b border-neutral-700">
+          <NavItem
+            icon={Bot}
+            label="Claw"
+            isActive={currentView === 'chat'}
+            onClick={() => setCurrentView('chat')}
+          />
+          <NavItem
+            icon={Users}
+            label="专家"
+            isActive={currentView === 'expert'}
+            onClick={() => setCurrentView('expert')}
+          />
+          <NavItem
+            icon={Clock}
+            label="自动化"
+            isActive={currentView === 'automation'}
+            onClick={() => setCurrentView('automation')}
+            badge="Beta"
+          />
+        </div>
+
         {/* Conversations List */}
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           {conversations.length === 0 ? (
             <div className="text-center text-neutral-500 py-8">
               <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">暂无对话</p>
+              <p className="text-sm">
+                {searchQuery ? '没有匹配的会话' : '暂无对话'}
+              </p>
             </div>
           ) : (
             <div className="space-y-1">

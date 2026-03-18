@@ -269,7 +269,7 @@ export function Sidebar() {
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary-500 rounded"
                 aria-label="清除搜索"
               >
                 <X className="w-4 h-4" />

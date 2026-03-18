@@ -34,10 +34,8 @@ export function ExpertCard({ expert, isSelected, onSummon }: ExpertCardProps) {
     >
       {/* Avatar */}
       <div
-        className={cn(
-          'w-12 h-12 rounded-full flex items-center justify-center mb-3 mx-auto',
-          expert.color || 'bg-primary-600'
-        )}
+        className="w-12 h-12 rounded-full flex items-center justify-center mb-3 mx-auto bg-primary-600"
+        style={expert.color ? { backgroundColor: expert.color } : undefined}
       >
         <Icon className="w-6 h-6 text-white" />
       </div>
@@ -57,12 +55,12 @@ export function ExpertCard({ expert, isSelected, onSummon }: ExpertCardProps) {
         </p>
       )}
 
-      {/* Summon button - appears on hover */}
+      {/* Summon button - appears on hover and focus */}
       <button
         onClick={() => onSummon(expert)}
         className={cn(
           'w-full py-2 rounded-lg text-sm font-medium transition-all',
-          'opacity-0 group-hover:opacity-100',
+          'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
           'bg-primary-600 hover:bg-primary-700 text-white',
           'focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary-500'
         )}

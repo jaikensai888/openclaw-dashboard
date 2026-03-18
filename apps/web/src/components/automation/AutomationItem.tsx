@@ -79,7 +79,7 @@ export function AutomationItem({ automation, onToggleStatus, onDelete, onRun }: 
         {/* Run now */}
         <button
           onClick={() => onRun(automation.id)}
-          className="p-2 rounded-lg hover:bg-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors"
+          className="p-2 min-w-[44px] min-h-[44px] rounded-lg hover:bg-neutral-700 text-neutral-400 hover:text-neutral-200 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
           aria-label="立即执行"
           title="立即执行"
         >
@@ -90,7 +90,7 @@ export function AutomationItem({ automation, onToggleStatus, onDelete, onRun }: 
         <button
           onClick={() => onToggleStatus(automation.id, isActive ? 'paused' : 'active')}
           className={cn(
-            'p-2 rounded-lg transition-colors',
+            'p-2 min-w-[44px] min-h-[44px] rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
             isActive
               ? 'hover:bg-neutral-700 text-neutral-400 hover:text-neutral-200'
               : 'hover:bg-green-600/20 text-green-400'
@@ -104,7 +104,7 @@ export function AutomationItem({ automation, onToggleStatus, onDelete, onRun }: 
         {/* Delete */}
         <button
           onClick={() => onDelete(automation.id)}
-          className="p-2 rounded-lg hover:bg-red-600/20 text-neutral-400 hover:text-red-400 transition-colors"
+          className="p-2 min-w-[44px] min-h-[44px] rounded-lg hover:bg-red-600/20 text-neutral-400 hover:text-red-400 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
           aria-label="删除"
           title="删除"
         >

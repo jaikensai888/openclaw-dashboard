@@ -186,6 +186,8 @@ interface ChatState {
   setExperts: (experts: Expert[]) => void;
   currentExpertId: string | null;
   setCurrentExpertId: (id: string | null) => void;
+  updateExpert: (id: string, updates: Partial<Expert>) => void;
+  addExpert: (expert: Expert) => void;
 
   // 新增：自动化相关状态
   automations: Automation[];
@@ -544,6 +546,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setExperts: (experts) => set({ experts }),
   currentExpertId: null,
   setCurrentExpertId: (id) => set({ currentExpertId: id }),
+
+  updateExpert: (id, updates) => set((state) => ({
+    experts: state.experts.map((e) =>
+      e.id === id ? { ...e, ...updates, updatedAt: new Date() } : e
+    ),
+  })),
+
+  addExpert: (expert) => set((state) => ({
+    experts: [expert, ...state.experts],
+  })),
 
   // 自动化相关状态
   automations: [],

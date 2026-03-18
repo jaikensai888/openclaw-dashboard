@@ -463,7 +463,7 @@ export function useWebSocket() {
   }, []);
 
   const sendMessage = useCallback(
-    (conversationId: string, content: string) => {
+    (conversationId: string, content: string, expertId?: string) => {
       const currentStore = useChatStore.getState();
 
       // 1. 先添加本地消息（乐观更新）
@@ -472,8 +472,8 @@ export function useWebSocket() {
       // 2. 开始计时等待 AI 响应
       currentStore.startThinking();
 
-      // 3. 发送到服务器，带上 tempId
-      send('chat.send', { conversationId, content, tempId });
+      // 3. 发送到服务器
+      send('chat.send', { conversationId, content, tempId, expertId });
 
       return tempId;
     },

@@ -1,5 +1,51 @@
 import { create } from 'zustand';
 
+// 新增类型定义
+type ViewType = 'chat' | 'expert' | 'automation';
+
+interface Expert {
+  id: string;
+  name: string;
+  avatar?: string;
+  title: string;
+  description?: string;
+  category: string;
+  systemPrompt: string;
+  color?: string;
+  icon?: string;
+  isDefault?: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface Automation {
+  id: string;
+  title: string;
+  description?: string;
+  agentId: string;
+  schedule: string;
+  scheduleDescription?: string;
+  status: 'active' | 'paused' | 'deleted';
+  lastRunAt?: Date;
+  nextRunAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface Artifact {
+  id: string;
+  conversationId: string;
+  taskId?: string;
+  type: 'document' | 'code' | 'image' | 'file';
+  title: string;
+  content?: string;
+  filePath?: string;
+  mimeType?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // Types
 interface Conversation {
   id: string;
@@ -7,6 +53,7 @@ interface Conversation {
   pinned: boolean;
   createdAt: Date;
   updatedAt: Date;
+  expertId?: string | null;  // 新增
 }
 
 interface Message {
@@ -124,6 +171,35 @@ interface ChatState {
   setActiveAgent: (conversationId: string, agent: ActiveAgentInfo) => void;
   handleAgentHandoff: (handoff: HandoffEvent) => ActiveAgentInfo | null;
   getCurrentAgent: (conversationId: string) => ActiveAgentInfo | null;
+
+  // 新增：视图状态
+  currentView: ViewType;
+  setCurrentView: (view: ViewType) => void;
+
+  // 新增：产物面板状态
+  artifactsPanelOpen: boolean;
+  toggleArtifactsPanel: () => void;
+  setArtifactsPanelOpen: (open: boolean) => void;
+
+  // 新增：专家相关状态
+  experts: Expert[];
+  setExperts: (experts: Expert[]) => void;
+  currentExpertId: string | null;
+  setCurrentExpertId: (id: string | null) => void;
+
+  // 新增：自动化相关状态
+  automations: Automation[];
+  setAutomations: (automations: Automation[]) => void;
+
+  // 新增：产物相关状态
+  artifacts: Artifact[];
+  setArtifacts: (artifacts: Artifact[]) => void;
+  selectedArtifactId: string | null;
+  setSelectedArtifactId: (id: string | null) => void;
+
+  // 新增：搜索过滤
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -132,7 +208,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentConversationId: null,
   isHistoryLoaded: false,
 
-  setCurrentConversation: (id) => set({ currentConversationId: id }),
+  setCurrentConversation: (id) => set((state) => {
+    // 切换会话时清理旧的 streaming 状态，避免阻塞新会话
+    if (state.currentConversationId !== id) {
+      return {
+        currentConversationId: id,
+        streamingContent: '',
+        isStreaming: false,
+        thinkingStartTime: null,
+        isThinking: false,
+      };
+    }
+    return { currentConversationId: id };
+  }),
 
   createConversation: (title) => {
     const id = `conv_${Date.now().toString(36)}`;
@@ -148,6 +236,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       conversations: [newConv, ...state.conversations],
       currentConversationId: id,
       messages: { ...state.messages, [id]: [] },
+      // 清理旧的 streaming 状态，避免阻塞新会话
+      streamingContent: '',
+      isStreaming: false,
+      thinkingStartTime: null,
+      isThinking: false,
     }));
     return id;
   },
@@ -436,7 +529,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const state = get();
     return state.currentAgentByConversation[conversationId] || null;
   },
+
+  // 视图状态
+  currentView: 'chat',
+  setCurrentView: (view) => set({ currentView: view }),
+
+  // 产物面板状态
+  artifactsPanelOpen: false,
+  toggleArtifactsPanel: () => set((state) => ({ artifactsPanelOpen: !state.artifactsPanelOpen })),
+  setArtifactsPanelOpen: (open) => set({ artifactsPanelOpen: open }),
+
+  // 专家相关状态
+  experts: [],
+  setExperts: (experts) => set({ experts }),
+  currentExpertId: null,
+  setCurrentExpertId: (id) => set({ currentExpertId: id }),
+
+  // 自动化相关状态
+  automations: [],
+  setAutomations: (automations) => set({ automations }),
+
+  // 产物相关状态
+  artifacts: [],
+  setArtifacts: (artifacts) => set({ artifacts }),
+  selectedArtifactId: null,
+  setSelectedArtifactId: (id) => set({ selectedArtifactId: id }),
+
+  // 搜索过滤
+  searchQuery: '',
+  setSearchQuery: (query) => set({ searchQuery: query }),
 }));
 
 // Export types for use in other files
-export type { Conversation, Message, Task, TaskOutput, ActiveAgentInfo, HandoffEvent };
+export type { Conversation, Message, Task, TaskOutput, ActiveAgentInfo, HandoffEvent, ViewType, Expert, Automation, Artifact };

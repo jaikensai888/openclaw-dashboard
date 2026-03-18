@@ -36,6 +36,7 @@ export interface HandleUserMessageOptions {
   content: string;
   virtualAgentId?: VirtualAgentId;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  expertSystemPrompt?: string;
 }
 
 export interface OrchestratorEvent {
@@ -101,7 +102,7 @@ export class Orchestrator {
    * Handle a user message - route to appropriate agent
    */
   async handleUserMessage(options: HandleUserMessageOptions): Promise<{ runId?: string; error?: string }> {
-    const { conversationId, content, virtualAgentId, history } = options;
+    const { conversationId, content, virtualAgentId, history, expertSystemPrompt } = options;
 
     // Get or create conversation state
     let state = this.conversationStates.get(conversationId);
@@ -124,6 +125,9 @@ export class Orchestrator {
     // Get the virtual agent
     const agent = getVirtualAgent(state.currentAgentId) || getDefaultVirtualAgent();
 
+    // Use expertSystemPrompt if provided, otherwise use agent's default
+    const effectiveSystemPrompt = expertSystemPrompt || agent.systemPrompt;
+
     // Emit agent.active event
     this.emit({
       type: 'agent.active',
@@ -134,7 +138,7 @@ export class Orchestrator {
     // Try Gateway direct connection first
     const gateway = getGatewayClient();
     if (gateway?.isConnected()) {
-      return this.runViaGateway(conversationId, agent, content, history, state);
+      return this.runViaGateway(conversationId, agent, content, history, state, effectiveSystemPrompt);
     }
 
     // Fall back to plugin mode (handled by websocket.ts)
@@ -241,7 +245,8 @@ export class Orchestrator {
     agent: VirtualAgent,
     content: string,
     history: Array<{ role: 'user' | 'assistant'; content: string }> | undefined,
-    state: ConversationState
+    state: ConversationState,
+    systemPrompt?: string
   ): Promise<{ runId?: string; error?: string }> {
     const gateway = getGatewayClient();
     if (!gateway) {
@@ -252,7 +257,7 @@ export class Orchestrator {
       const options: RunAgentOptions = {
         conversationId,
         virtualAgentId: agent.id,
-        systemPrompt: agent.systemPrompt,
+        systemPrompt: systemPrompt || agent.systemPrompt,
         userMessage: content,
         history,
         model: agent.model,

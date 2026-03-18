@@ -1,9 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Plus } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { ExpertCard } from './ExpertCard';
+import { ExpertModal } from './ExpertModal';
 import { cn } from '@/lib/utils';
+import { API_BASE_URL } from '@/lib/api';
 import type { Expert } from '@/stores/chatStore';
 
 interface Category {
@@ -12,10 +15,15 @@ interface Category {
 }
 
 export function ExpertCenter() {
-  const { experts, setExperts, setCurrentView, setCurrentExpertId, createConversation } = useChatStore();
+  const { experts, setExperts, setCurrentView, setCurrentExpertId, createConversation, updateExpert, addExpert } = useChatStore();
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+  const [editingExpert, setEditingExpert] = useState<Expert | null>(null);
 
   // Fetch experts and categories
   useEffect(() => {
@@ -23,8 +31,8 @@ export function ExpertCenter() {
       try {
         // Fetch experts
         const expertsUrl = selectedCategory
-          ? `/api/v1/experts?category=${encodeURIComponent(selectedCategory)}`
-          : '/api/v1/experts';
+          ? `${API_BASE_URL}/experts?category=${encodeURIComponent(selectedCategory)}`
+          : `${API_BASE_URL}/experts`;
         const expertsRes = await fetch(expertsUrl);
         const expertsData = await expertsRes.json();
         if (expertsData.success) {
@@ -32,7 +40,7 @@ export function ExpertCenter() {
         }
 
         // Fetch categories
-        const categoriesRes = await fetch('/api/v1/experts/categories');
+        const categoriesRes = await fetch(`${API_BASE_URL}/experts/categories`);
         const categoriesData = await categoriesRes.json();
         if (categoriesData.success) {
           setCategories(categoriesData.data);
@@ -56,6 +64,26 @@ export function ExpertCenter() {
     // TODO: Also send to server via WebSocket
   };
 
+  const handleOpenCreate = () => {
+    setModalMode('create');
+    setEditingExpert(null);
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (expert: Expert) => {
+    setModalMode('edit');
+    setEditingExpert(expert);
+    setModalOpen(true);
+  };
+
+  const handleSaveExpert = (expert: Expert) => {
+    if (modalMode === 'edit') {
+      updateExpert(expert.id, expert);
+    } else {
+      addExpert(expert);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-neutral-900">
@@ -68,10 +96,21 @@ export function ExpertCenter() {
     <main className="flex-1 flex flex-col bg-neutral-900 overflow-hidden" role="main">
       {/* Header */}
       <div className="p-6 border-b border-neutral-700">
-        <h1 className="text-2xl font-semibold mb-2">专家中心</h1>
-        <p className="text-sm text-neutral-500">
-          按行业分类浏览专家，召唤他们为你服务
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold mb-2">专家中心</h1>
+            <p className="text-sm text-neutral-500">
+              按行业分类浏览专家，召唤他们为你服务
+            </p>
+          </div>
+          <button
+            onClick={handleOpenCreate}
+            className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>新增专家</span>
+          </button>
+        </div>
       </div>
 
       {/* Category tabs */}
@@ -116,11 +155,22 @@ export function ExpertCenter() {
                 key={expert.id}
                 expert={expert}
                 onSummon={handleSummon}
+                onEdit={handleOpenEdit}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Expert Modal */}
+      <ExpertModal
+        open={modalOpen}
+        mode={modalMode}
+        expert={editingExpert}
+        categories={categories.map((c) => c.category)}
+        onClose={() => setModalOpen(false)}
+        onSuccess={handleSaveExpert}
+      />
     </main>
   );
 }

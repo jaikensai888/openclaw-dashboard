@@ -1,6 +1,6 @@
 'use client';
 
-import { User, Bot } from 'lucide-react';
+import { User, Bot, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Expert } from '@/stores/chatStore';
 
@@ -8,9 +8,10 @@ interface ExpertCardProps {
   expert: Expert;
   isSelected?: boolean;
   onSummon: (expert: Expert) => void;
+  onEdit?: (expert: Expert) => void;
 }
 
-export function ExpertCard({ expert, isSelected, onSummon }: ExpertCardProps) {
+export function ExpertCard({ expert, isSelected, onSummon, onEdit }: ExpertCardProps) {
   const getIcon = () => {
     switch (expert.icon) {
       case 'Bot':
@@ -74,6 +75,24 @@ export function ExpertCard({ expert, isSelected, onSummon }: ExpertCardProps) {
         <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded bg-neutral-700 text-neutral-400">
           默认
         </span>
+      )}
+
+      {/* Edit button - appears on hover */}
+      {onEdit && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(expert);
+          }}
+          className={cn(
+            'absolute top-2 left-2 p-1.5 rounded-lg transition-all',
+            'opacity-0 group-hover:opacity-100',
+            'bg-neutral-700 hover:bg-neutral-600 text-neutral-400 hover:text-white'
+          )}
+          aria-label={`编辑 ${expert.name}`}
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
       )}
     </div>
   );

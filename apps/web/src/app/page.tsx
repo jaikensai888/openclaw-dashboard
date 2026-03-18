@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MainContent } from '@/components/layout/MainContent';
+import { ArtifactsPanel } from '@/components/layout/ArtifactsPanel';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 
@@ -83,6 +84,7 @@ export default function Home() {
     <div className="flex h-screen bg-neutral-900 text-white">
       <Sidebar />
       <MainContent />
+      <ArtifactsPanel />
     </div>
   );
 }

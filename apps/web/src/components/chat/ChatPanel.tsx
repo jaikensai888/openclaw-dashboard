@@ -5,7 +5,8 @@ import { MessageList } from './MessageList';
 import { InputBar } from './InputBar';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { Bot, ChevronDown } from 'lucide-react';
+import { Bot, ChevronDown, FileText } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export function ChatPanel() {
   const {
@@ -17,6 +18,8 @@ export function ChatPanel() {
     isThinking,
     availableAgents,
     getCurrentAgent,
+    artifactsPanelOpen,
+    toggleArtifactsPanel,
   } = useChatStore();
 
   // Compute thinking duration in real-time
@@ -64,36 +67,51 @@ export function ChatPanel() {
     <div className="flex flex-col h-full">
       {/* Agent indicator bar */}
       {currentConversationId && (
-        <div className="border-b border-neutral-700 px-4 py-2 flex items-center gap-2">
-          <Bot className="w-4 h-4 text-neutral-400" />
-          {(() => {
-            const currentAgent = getCurrentAgent(currentConversationId);
-            if (currentAgent) {
-              return (
-                <div className="flex items-center gap-2">
-                  <span
-                    className="px-2 py-0.5 rounded-full text-xs font-medium"
-                    style={{
-                      backgroundColor: currentAgent.color ? `${currentAgent.color}20` : '#0ea5e920',
-                      color: currentAgent.color || '#0ea5e9',
-                    }}
-                  >
-                    {currentAgent.displayName}
-                  </span>
-                  {currentAgent.description && (
-                    <span className="text-xs text-neutral-500">
-                      {currentAgent.description}
+        <div className="border-b border-neutral-700 px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4 text-neutral-400" />
+            {(() => {
+              const currentAgent = getCurrentAgent(currentConversationId);
+              if (currentAgent) {
+                return (
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-medium"
+                      style={{
+                        backgroundColor: currentAgent.color ? `${currentAgent.color}20` : '#0ea5e920',
+                        color: currentAgent.color || '#0ea5e9',
+                      }}
+                    >
+                      {currentAgent.displayName}
                     </span>
-                  )}
-                </div>
+                    {currentAgent.description && (
+                      <span className="text-xs text-neutral-500">
+                        {currentAgent.description}
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+              return (
+                <span className="text-xs text-neutral-500">
+                  {availableAgents.length > 0 ? '选择一个 Agent 开始' : '正在加载...'}
+                </span>
               );
-            }
-            return (
-              <span className="text-xs text-neutral-500">
-                {availableAgents.length > 0 ? '选择一个 Agent 开始' : '正在加载...'}
-              </span>
-            );
-          })()}
+            })()}
+          </div>
+          {/* Artifacts toggle button */}
+          <button
+            onClick={toggleArtifactsPanel}
+            className={cn(
+              'p-2 rounded-lg transition-colors',
+              artifactsPanelOpen
+                ? 'bg-primary-600 text-white'
+                : 'hover:bg-neutral-700 text-neutral-400'
+            )}
+            aria-label={artifactsPanelOpen ? '关闭产物面板' : '打开产物面板'}
+          >
+            <FileText className="w-4 h-4" />
+          </button>
         </div>
       )}
 

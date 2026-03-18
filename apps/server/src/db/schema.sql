@@ -58,3 +58,57 @@ CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_conversation ON tasks(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_task_outputs_task ON task_outputs(task_id);
+
+-- Experts table (专家/角色)
+CREATE TABLE IF NOT EXISTS experts (
+    id TEXT PRIMARY KEY,              -- UUID, format: expert_xxx
+    name TEXT NOT NULL,               -- 专家名称
+    avatar TEXT,                      -- 头像 URL
+    title TEXT NOT NULL,              -- 头衔
+    description TEXT,                 -- 简介
+    category TEXT NOT NULL,           -- 分类
+    system_prompt TEXT NOT NULL,      -- 系统提示词
+    color TEXT,                       -- 主题色
+    icon TEXT,                        -- 图标
+    is_default INTEGER DEFAULT 0,     -- 是否为默认角色
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Automations table (自动化任务)
+CREATE TABLE IF NOT EXISTS automations (
+    id TEXT PRIMARY KEY,              -- UUID, format: auto_xxx
+    title TEXT NOT NULL,              -- 任务名称
+    description TEXT,                 -- 任务描述
+    agent_id TEXT NOT NULL,           -- 执行的 Agent ID
+    schedule TEXT NOT NULL,           -- Cron 表达式
+    schedule_description TEXT,        -- 人类可读的调度描述
+    status TEXT DEFAULT 'active',     -- 'active' | 'paused' | 'deleted'
+    last_run_at DATETIME,             -- 上次执行时间
+    next_run_at DATETIME,             -- 下次执行时间
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Artifacts table (产物)
+CREATE TABLE IF NOT EXISTS artifacts (
+    id TEXT PRIMARY KEY,              -- UUID, format: artifact_xxx
+    conversation_id TEXT NOT NULL,    -- 所属会话
+    task_id TEXT,                     -- 关联任务（可选）
+    type TEXT NOT NULL,               -- 'document' | 'code' | 'image' | 'file'
+    title TEXT NOT NULL,              -- 产物标题
+    content TEXT,                     -- 产物内容
+    file_path TEXT,                   -- 文件路径
+    mime_type TEXT,                   -- MIME 类型
+    metadata TEXT,                    -- JSON 元数据
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+    FOREIGN KEY (task_id) REFERENCES tasks(id)
+);
+
+-- Indexes for new tables
+CREATE INDEX IF NOT EXISTS idx_experts_category ON experts(category);
+CREATE INDEX IF NOT EXISTS idx_automations_status ON automations(status);
+CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);

@@ -77,6 +77,89 @@ function runMigrations(database: SqlJsDatabase): void {
   } catch (err) {
     console.error('[DB] Migration error:', err);
   }
+
+  // Migration 2: Add expert_id column to conversations if missing
+  try {
+    const columns = database.exec("PRAGMA table_info(conversations)");
+    const columnNames = columns[0]?.values?.map((v) => v[1] as string) || [];
+
+    if (!columnNames.includes('expert_id')) {
+      console.log('[DB] Migration: Adding expert_id column to conversations');
+      database.run("ALTER TABLE conversations ADD COLUMN expert_id TEXT");
+    }
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
+
+  // Migration 3: Create experts table if not exists
+  try {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS experts (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        avatar TEXT,
+        title TEXT NOT NULL,
+        description TEXT,
+        category TEXT NOT NULL,
+        system_prompt TEXT NOT NULL,
+        color TEXT,
+        icon TEXT,
+        is_default INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_experts_category ON experts(category)`);
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
+
+  // Migration 4: Create automations table if not exists
+  try {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS automations (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        agent_id TEXT NOT NULL,
+        schedule TEXT NOT NULL,
+        schedule_description TEXT,
+        status TEXT DEFAULT 'active',
+        last_run_at DATETIME,
+        next_run_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_automations_status ON automations(status)`);
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
+
+  // Migration 5: Create artifacts table if not exists
+  try {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS artifacts (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        task_id TEXT,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT,
+        file_path TEXT,
+        mime_type TEXT,
+        metadata TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id)
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id)`);
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
 }
 
 export function closeDatabase(): void {

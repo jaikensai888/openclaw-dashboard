@@ -2,8 +2,9 @@
 
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { ExpertCenter } from '@/components/expert/ExpertCenter';
+import { AutomationCenter } from '@/components/automation/AutomationCenter';
 import { useChatStore } from '@/stores/chatStore';
-import { Sparkles, Clock } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 export function MainContent() {
   const { currentConversationId, currentView } = useChatStore();
@@ -14,26 +15,7 @@ export function MainContent() {
       case 'expert':
         return <ExpertCenter />;
       case 'automation':
-        return (
-          <main id="main-content" className="flex-1 flex flex-col bg-neutral-900" role="main">
-            <div className="flex-1 flex items-center justify-center">
-              <div className="text-center text-neutral-500 max-w-md px-4">
-                <div className="mb-6">
-                  <Clock className="w-16 h-16 mx-auto mb-4 text-primary-500 opacity-50" aria-hidden="true" />
-                </div>
-                <h1 className="text-2xl font-semibold mb-3 text-neutral-200">
-                  自动化中心
-                </h1>
-                <p className="text-sm mb-6">
-                  管理自动化任务并查看近期运行记录
-                </p>
-                <div className="inline-block px-2 py-1 rounded bg-neutral-700 text-xs">
-                  Beta
-                </div>
-              </div>
-            </div>
-          </main>
-        );
+        return <AutomationCenter />;
       case 'chat':
       default:
         if (!currentConversationId) {

@@ -49,6 +49,7 @@ export async function initDatabase(config: DbConfig): Promise<SqlJsDatabase> {
 
   // Seed default data
   seedDefaultExperts();
+  seedDefaultCategories();
 
   // Save initial state
   saveDatabase();
@@ -160,6 +161,63 @@ function runMigrations(database: SqlJsDatabase): void {
     `);
     database.run(`CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id)`);
     database.run(`CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id)`);
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
+
+  // Migration 6: Create categories table if not exists
+  try {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_categories_sort ON categories(sort_order)`);
+    console.log('[DB] Migration: categories table created');
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
+
+  // Migration 7: Make experts.category nullable
+  try {
+    const testTable = database.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='experts'");
+    const createSql = testTable[0]?.values?.[0]?.[0] as string || '';
+
+    // Only migrate if category is NOT NULL
+    if (createSql.includes('category TEXT NOT NULL')) {
+      console.log('[DB] Migration: Making experts.category nullable');
+
+      // Create new table with nullable category
+      database.run(`
+        CREATE TABLE experts_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          avatar TEXT,
+          title TEXT NOT NULL,
+          description TEXT,
+          category TEXT,
+          system_prompt TEXT NOT NULL,
+          color TEXT,
+          icon TEXT,
+          is_default INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Copy data
+      database.run(`INSERT INTO experts_new SELECT * FROM experts`);
+
+      // Drop old table and rename
+      database.run('DROP TABLE experts');
+      database.run('ALTER TABLE experts_new RENAME TO experts');
+      database.run('CREATE INDEX IF NOT EXISTS idx_experts_category ON experts(category)');
+    }
   } catch (err) {
     console.error('[DB] Migration error:', err);
   }
@@ -292,4 +350,33 @@ export function seedDefaultExperts(): void {
   }
 
   console.log('[DB] Default experts seeded');
+}
+
+/**
+ * Seed default categories if none exist
+ */
+export function seedDefaultCategories(): void {
+  const count = get<{ count: number }>('SELECT COUNT(*) as count FROM categories');
+  if (count && count.count > 0) {
+    return; // Already seeded
+  }
+
+  console.log('[DB] Seeding default categories...');
+  const now = new Date().toISOString();
+
+  // Get unique categories from experts
+  const expertCategories = all<{ category: string; count: number }>(
+    'SELECT category, COUNT(*) as count FROM experts WHERE category IS NOT NULL GROUP BY category'
+  );
+
+  // Create categories from existing expert categories
+  expertCategories.forEach((row, index) => {
+    run(
+      `INSERT INTO categories (id, name, description, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [`cat_${index}`, row.category, null, index, now, now]
+    );
+  });
+
+  console.log('[DB] Default categories seeded');
 }

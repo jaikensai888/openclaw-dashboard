@@ -12,7 +12,7 @@ interface ExpertRow {
   avatar: string | null;
   title: string;
   description: string | null;
-  category: string;
+  category: string | null;
   system_prompt: string;
   color: string | null;
   icon: string | null;
@@ -48,7 +48,10 @@ export async function expertRoutes(fastify: FastifyInstance) {
     let sql = 'SELECT * FROM experts WHERE 1=1';
     const params: (string | number | null)[] = [];
 
-    if (category) {
+    if (category === 'null') {
+      // Filter for uncategorized experts
+      sql += ' AND category IS NULL';
+    } else if (category) {
       sql += ' AND category = ?';
       params.push(category);
     }

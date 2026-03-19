@@ -11,6 +11,7 @@ import { messageRoutes } from './routes/messages.js';
 import { taskRoutes } from './routes/tasks.js';
 import { artifactRoutes } from './routes/artifacts.js';
 import { expertRoutes } from './routes/experts.js';
+import { categoryRoutes } from './routes/categories.js';
 import { automationRoutes } from './routes/automations.js';
 import { websocketRoutes } from './routes/websocket.js';
 import { pluginRoutes } from './routes/plugin.js';
@@ -123,6 +124,7 @@ export async function createApp(config: Partial<AppConfig> = {}) {
     api.register(taskRoutes);
     api.register(artifactRoutes);
     api.register(expertRoutes);
+    api.register(categoryRoutes);
     api.register(automationRoutes);
   }, { prefix: '/api/v1' });
 

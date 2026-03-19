@@ -11,7 +11,7 @@ const MAX_MESSAGE_LENGTH = 10000;
 export function InputBar() {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { currentConversationId, isStreaming } = useChatStore();
+  const { currentConversationId, isStreaming, currentExpertId } = useChatStore();
   const { sendMessage, cancelTask } = useWebSocket();
 
   const charCount = input.length;
@@ -22,7 +22,7 @@ export function InputBar() {
     if (!content || !currentConversationId || isStreaming || isOverLimit) return;
 
     // Send to server (server will broadcast the message back)
-    sendMessage(currentConversationId, content);
+    sendMessage(currentConversationId, content, currentExpertId || undefined);
 
     // Clear input
     setInput('');

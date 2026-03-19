@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Clock } from 'lucide-react';
 import { useChatStore, type Automation } from '@/stores/chatStore';
 import { AutomationItem } from './AutomationItem';
+import { API_BASE_URL } from '@/lib/api';
 
 export function AutomationCenter() {
   const { automations, setAutomations } = useChatStore();
@@ -12,7 +13,7 @@ export function AutomationCenter() {
   useEffect(() => {
     const fetchAutomations = async () => {
       try {
-        const res = await fetch('/api/v1/automations?status=active&status=paused');
+        const res = await fetch(`${API_BASE_URL}/automations?status=active&status=paused`);
         const data = await res.json();
         if (data.success) {
           setAutomations(data.data);
@@ -29,7 +30,7 @@ export function AutomationCenter() {
 
   const handleToggleStatus = async (id: string, status: 'active' | 'paused') => {
     try {
-      const res = await fetch(`/api/v1/automations/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/automations/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
@@ -46,7 +47,7 @@ export function AutomationCenter() {
   const handleDelete = async (id: string) => {
     if (!confirm('确定要删除这个自动化任务吗？')) return;
     try {
-      const res = await fetch(`/api/v1/automations/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE_URL}/automations/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         setAutomations(automations.filter((a) => a.id !== id));
@@ -58,7 +59,7 @@ export function AutomationCenter() {
 
   const handleRun = async (id: string) => {
     try {
-      const res = await fetch(`/api/v1/automations/${id}/run`, { method: 'POST' });
+      const res = await fetch(`${API_BASE_URL}/automations/${id}/run`, { method: 'POST' });
       const data = await res.json();
       if (data.success) {
         // Update the automation with new lastRunAt

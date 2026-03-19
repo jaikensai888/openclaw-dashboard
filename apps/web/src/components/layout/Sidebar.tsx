@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check, Search, Bot, Users, Clock } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check, Search, Bot, Users, Clock, Folder } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
@@ -309,6 +309,20 @@ export function Sidebar() {
             onClick={() => setCurrentView('automation')}
             badge="Beta"
           />
+        </div>
+
+        {/* Settings Group */}
+        <div className="px-3 py-2 space-y-1 border-b border-neutral-700">
+          <div className="px-3 py-1.5 text-xs text-neutral-500 font-medium uppercase tracking-wider">
+            设置
+          </div>
+          <button
+            onClick={() => window.location.href = '/settings/categories'}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors hover:bg-neutral-700 text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <Folder className="w-5 h-5" />
+            <span className="text-sm">分类管理</span>
+          </button>
         </div>
 
         {/* Conversations List */}

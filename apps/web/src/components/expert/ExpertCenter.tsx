@@ -10,9 +10,14 @@ import { API_BASE_URL } from '@/lib/api';
 import type { Expert } from '@/stores/chatStore';
 
 interface Category {
-  category: string;
-  count: number;
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  expertCount: number;
 }
+
+const UNCATALOGIZED_KEY = '__uncategorized__';
 
 export function ExpertCenter() {
   const { experts, setExperts, setCurrentView, setCurrentExpertId, createConversation, updateExpert, addExpert } = useChatStore();
@@ -29,18 +34,25 @@ export function ExpertCenter() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // Build experts URL based on selected category
+        let expertsUrl: string;
+        if (selectedCategory === UNCATALOGIZED_KEY) {
+          expertsUrl = `${API_BASE_URL}/experts?category=null`;
+        } else if (selectedCategory) {
+          expertsUrl = `${API_BASE_URL}/experts?category=${encodeURIComponent(selectedCategory)}`;
+        } else {
+          expertsUrl = `${API_BASE_URL}/experts`;
+        }
+
         // Fetch experts
-        const expertsUrl = selectedCategory
-          ? `${API_BASE_URL}/experts?category=${encodeURIComponent(selectedCategory)}`
-          : `${API_BASE_URL}/experts`;
         const expertsRes = await fetch(expertsUrl);
         const expertsData = await expertsRes.json();
         if (expertsData.success) {
           setExperts(expertsData.data);
         }
 
-        // Fetch categories
-        const categoriesRes = await fetch(`${API_BASE_URL}/experts/categories`);
+        // Fetch categories from new API
+        const categoriesRes = await fetch(`${API_BASE_URL}/categories`);
         const categoriesData = await categoriesRes.json();
         if (categoriesData.success) {
           setCategories(categoriesData.data);
@@ -83,6 +95,9 @@ export function ExpertCenter() {
       addExpert(expert);
     }
   };
+
+  // Count uncategorized experts
+  const uncategorizedCount = experts.filter(e => !e.category).length;
 
   if (loading) {
     return (
@@ -128,18 +143,32 @@ export function ExpertCenter() {
         </button>
         {categories.map((cat) => (
           <button
-            key={cat.category}
-            onClick={() => setSelectedCategory(cat.category)}
+            key={cat.id}
+            onClick={() => setSelectedCategory(cat.name)}
             className={cn(
               'px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors',
-              selectedCategory === cat.category
+              selectedCategory === cat.name
                 ? 'bg-primary-600 text-white'
                 : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
             )}
           >
-            {cat.category} ({cat.count})
+            {cat.name} ({cat.expertCount})
           </button>
         ))}
+        {/* Uncategorized Tab - show if there are uncategorized experts */}
+        {uncategorizedCount > 0 && (
+          <button
+            onClick={() => setSelectedCategory(UNCATALOGIZED_KEY)}
+            className={cn(
+              'px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition-colors',
+              selectedCategory === UNCATALOGIZED_KEY
+                ? 'bg-primary-600 text-white'
+                : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
+            )}
+          >
+            未分类 ({uncategorizedCount})
+          </button>
+        )}
       </div>
 
       {/* Expert grid */}
@@ -167,7 +196,7 @@ export function ExpertCenter() {
         open={modalOpen}
         mode={modalMode}
         expert={editingExpert}
-        categories={categories.map((c) => c.category)}
+        categories={categories.map((c) => c.name)}
         onClose={() => setModalOpen(false)}
         onSuccess={handleSaveExpert}
       />

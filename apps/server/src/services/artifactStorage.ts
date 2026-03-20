@@ -159,7 +159,7 @@ export function saveArtifact(
 /**
  * 获取会话的所有产物
  */
-export function listArtifacts(conversationId: string): Artifact[] {
+export function listArtifacts(conversationId: string): (Artifact & { content?: string; metadata?: Record<string, unknown> })[] {
   const rows = all<ArtifactRow>(
     'SELECT * FROM artifacts WHERE conversation_id = ? ORDER BY created_at DESC',
     [conversationId]
@@ -173,6 +173,8 @@ export function listArtifacts(conversationId: string): Artifact[] {
     mimeType: row.mime_type || 'text/plain',
     size: row.metadata ? JSON.parse(row.metadata).size || 0 : 0,
     path: row.file_path || '',
+    content: row.content || undefined,
+    metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
     createdAt: new Date(row.created_at),
   }));
 }

@@ -5,6 +5,12 @@
 import type { FastifyInstance } from 'fastify';
 import { v4 as uuidv4 } from 'uuid';
 import { run, get, all } from '../db/index.js';
+import {
+  getArtifact as getStoredArtifact,
+  readArtifactContent,
+  listArtifacts as listStoredArtifacts,
+  deleteArtifact as deleteStoredArtifact,
+} from '../services/artifactStorage.js';
 
 interface ArtifactRow {
   id: string;
@@ -177,7 +183,80 @@ export async function artifactRoutes(fastify: FastifyInstance) {
       return reply.status(404).send({ success: false, error: 'Artifact not found' });
     }
 
+    // Delete from file system
+    await deleteStoredArtifact(id);
+
+    // Delete from database
     run('DELETE FROM artifacts WHERE id = ?', [id]);
     return { success: true };
+  });
+
+  // Download artifact file
+  fastify.get<{ Params: { id: string } }>('/artifacts/:id/download', async (request, reply) => {
+    const { id } = request.params;
+    const row = get<ArtifactRow>('SELECT * FROM artifacts WHERE id = ?', [id]);
+
+    if (!row) {
+      return reply.status(404).send({ success: false, error: 'Artifact not found' });
+    }
+
+    // Try to get file from storage
+    const storedArtifact = await getStoredArtifact(id);
+    if (!storedArtifact) {
+      // If no file, return content from database
+      if (row.content) {
+        return reply
+          .header('Content-Type', row.mime_type || 'text/plain')
+          .header('Content-Disposition', `attachment; filename="${row.title}"`)
+          .send(row.content);
+      }
+      return reply.status(404).send({ success: false, error: 'Artifact content not found' });
+    }
+
+    // Read file content
+    const content = await readArtifactContent(id);
+    if (content === null) {
+      return reply.status(404).send({ success: false, error: 'Artifact file not found' });
+    }
+
+    return reply
+      .header('Content-Type', storedArtifact.mimeType)
+      .header('Content-Disposition', `attachment; filename="${storedArtifact.filename}"`)
+      .send(content);
+  });
+
+  // Preview artifact (for images, code, etc.)
+  fastify.get<{ Params: { id: string } }>('/artifacts/:id/preview', async (request, reply) => {
+    const { id } = request.params;
+    const row = get<ArtifactRow>('SELECT * FROM artifacts WHERE id = ?', [id]);
+
+    if (!row) {
+      return reply.status(404).send({ success: false, error: 'Artifact not found' });
+    }
+
+    // Try to get file from storage
+    const storedArtifact = await getStoredArtifact(id);
+    if (!storedArtifact) {
+      // If no file, return content from database for preview
+      if (row.content) {
+        const mimeType = row.mime_type || 'text/plain';
+        return reply
+          .header('Content-Type', mimeType)
+          .send(row.content);
+      }
+      return reply.status(404).send({ success: false, error: 'Artifact content not found' });
+    }
+
+    // Read file content
+    const content = await readArtifactContent(id);
+    if (content === null) {
+      return reply.status(404).send({ success: false, error: 'Artifact file not found' });
+    }
+
+    // For images, set appropriate content type for inline display
+    return reply
+      .header('Content-Type', storedArtifact.mimeType)
+      .header('Cache-Control', 'public, max-age=3600')
+      .send(content);
   });
 }

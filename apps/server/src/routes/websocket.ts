@@ -180,6 +180,13 @@ async function handleSwitchConversation(ws: WebSocket, payload: { conversationId
       createdAt: m.created_at,
     })),
   });
+
+  // Load artifacts for this conversation
+  const artifacts = listArtifacts(conversationId);
+  send(ws, 'artifacts.list', {
+    conversationId,
+    artifacts,
+  });
 }
 
 async function handleChatSend(ws: WebSocket, payload: {

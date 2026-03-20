@@ -11,6 +11,13 @@ import { messageParser } from '../services/messageParser.js';
 import { taskManager } from '../services/taskManager.js';
 import { getOrchestrator, type OrchestratorEvent } from '../services/orchestrator.js';
 import { getGatewayClient } from '../services/openclawGatewayClient.js';
+import {
+  saveArtifact,
+  listArtifacts,
+  deleteConversationArtifacts,
+  type Artifact,
+} from '../services/artifactStorage.js';
+import { extractArtifactsFromMessage } from '../services/messageParser.js';
 import type { TaskType, WSChatSendWithAgentPayload, VirtualAgentId } from '@openclaw-dashboard/shared';
 
 interface ClientConnection {
@@ -100,6 +107,10 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
 
     case 'agents.list':
       handleListAgents(ws);
+      break;
+
+    case 'artifacts.load':
+      handleLoadArtifacts(ws, payload as { conversationId: string });
       break;
 
     default:
@@ -379,6 +390,9 @@ async function handleDeleteConversation(ws: WebSocket, payload: { conversationId
     return;
   }
 
+  // Delete artifacts first (file system and database)
+  deleteConversationArtifacts(conversationId);
+
   // Delete messages first (foreign key constraint)
   run(`DELETE FROM messages WHERE conversation_id = ?`, [conversationId]);
   // Delete conversation
@@ -391,6 +405,15 @@ async function handleListAgents(ws: WebSocket) {
   const orchestrator = getOrchestrator();
   const agents = orchestrator.getAvailableAgents();
   send(ws, 'agents.list', { agents });
+}
+
+async function handleLoadArtifacts(ws: WebSocket, payload: { conversationId: string }) {
+  const { conversationId } = payload;
+  const artifacts = listArtifacts(conversationId);
+  send(ws, 'artifacts.list', {
+    conversationId,
+    artifacts,
+  });
 }
 
 function setupPluginMessageHandlers() {
@@ -565,6 +588,29 @@ function handleAgentMessage(conversationId: string, content: string) {
   }
 
   run(`UPDATE conversations SET updated_at = ? WHERE id = ?`, [now, conversationId]);
+
+  // Extract and save artifacts from message content
+  if (content) {
+    const extracted = extractArtifactsFromMessage(content);
+    for (const item of extracted) {
+      try {
+        const artifact = saveArtifact(
+          conversationId,
+          item.filename || `artifact_${Date.now()}`,
+          item.content,
+          item.type
+        );
+
+        // Broadcast artifact creation event
+        broadcast('artifact.created', {
+          conversationId,
+          artifact,
+        });
+      } catch (error) {
+        console.error('[WS] Failed to save artifact:', error);
+      }
+    }
+  }
 }
 
 function send(ws: WebSocket, type: string, payload: unknown) {
@@ -633,6 +679,29 @@ function setupOrchestratorHandlers() {
             messageType: 'text',
             createdAt: now,
           });
+
+          // Extract and save artifacts from message content
+          if (content) {
+            const extracted = extractArtifactsFromMessage(content);
+            for (const item of extracted) {
+              try {
+                const artifact = saveArtifact(
+                  conversationId,
+                  item.filename || `artifact_${Date.now()}`,
+                  item.content,
+                  item.type
+                );
+
+                // Broadcast artifact creation event
+                broadcast('artifact.created', {
+                  conversationId,
+                  artifact,
+                });
+              } catch (error) {
+                console.error('[Orchestrator] Failed to save artifact:', error);
+              }
+            }
+          }
         }
         break;
 

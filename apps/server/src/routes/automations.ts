@@ -130,6 +130,53 @@ function rowToAutomation(row: AutomationRow) {
   };
 }
 
+/**
+ * Simple rule-based parser for common time patterns in Chinese
+ */
+function parseScheduleFromRules(input: string): { title: string; schedule: string; scheduleDescription: string } | null {
+  const lowerInput = input.toLowerCase();
+
+  // Time patterns with regex
+  const patterns = [
+    { regex: /每(\d+)分钟/, schedule: (m: string) => `*/${m} * * * *`, desc: (m: string) => `每 ${m} 分钟` },
+    { regex: /每(\d+)小时/, schedule: (h: string) => `0 */${h} * * *`, desc: (h: string) => `每 ${h} 小时` },
+    { regex: /每天\s*(\d+):(\d+)/, schedule: (h: string, m: string) => `${m} ${h} * * *`, desc: (h: string, m: string) => `每天 ${h}:${m.padStart(2, '0')}` },
+    { regex: /每天\s*(\d+)点/, schedule: (h: string) => `0 ${h} * * *`, desc: (h: string) => `每天 ${h}:00` },
+    { regex: /每小时/, schedule: () => `0 * * * *`, desc: () => `每小时整点` },
+    { regex: /每分钟/, schedule: () => `* * * * *`, desc: () => `每分钟` },
+  ];
+
+  for (const { regex, schedule, desc } of patterns) {
+    const match = lowerInput.match(regex);
+    if (match) {
+      // Extract title (remove time part)
+      let title = input.replace(regex, '').replace(/[，,。、]/g, '').trim();
+      if (!title) title = '定时任务';
+
+      let scheduleStr: string;
+      let descStr: string;
+
+      // Use type assertions since we've verified argument count via match.length
+      if (match.length === 1) {
+        scheduleStr = (schedule as () => string)();
+        descStr = (desc as () => string)();
+      } else if (match.length === 2) {
+        scheduleStr = (schedule as (a: string) => string)(match[1]);
+        descStr = (desc as (a: string) => string)(match[1]);
+      } else if (match.length === 3) {
+        scheduleStr = (schedule as (a: string, b: string) => string)(match[1], match[2]);
+        descStr = (desc as (a: string, b: string) => string)(match[1], match[2]);
+      } else {
+        continue;
+      }
+
+      return { title, schedule: scheduleStr, scheduleDescription: descStr };
+    }
+  }
+
+  return null;
+}
+
 export async function automationRoutes(fastify: FastifyInstance) {
   // List automations (optionally filtered by status)
   fastify.get<{
@@ -174,15 +221,41 @@ export async function automationRoutes(fastify: FastifyInstance) {
   // Create automation
   fastify.post<{
     Body: {
-      title: string;
+      title?: string;           // 可选：如果提供 input 则从 input 解析
       description?: string;
       agentId: string;
-      schedule: string;
+      schedule?: string;        // 可选：如果提供 input 则从 input 解析
       scheduleDescription?: string;
+      input?: string;           // 新增：自然语言输入
       status?: 'active' | 'paused';
     };
   }>('/automations', async (request, reply) => {
-    const { title, description, agentId, schedule, scheduleDescription, status } = request.body;
+    let { title, description, agentId, schedule, scheduleDescription, input, status } = request.body;
+
+    // If input is provided, parse it to extract schedule info
+    if (input && (!title || !schedule)) {
+      const parsed = parseScheduleFromRules(input);
+      if (parsed) {
+        if (!title) title = parsed.title;
+        if (!schedule) schedule = parsed.schedule;
+        if (!scheduleDescription) scheduleDescription = parsed.scheduleDescription;
+      } else {
+        // Fallback: use input as title with default schedule
+        if (!title) title = input;
+        if (!schedule) {
+          schedule = '0 9 * * *';
+          scheduleDescription = '每天 9:00（默认）';
+        }
+      }
+    }
+
+    // Validate required fields
+    if (!title || !agentId || !schedule) {
+      return reply.status(400).send({
+        success: false,
+        error: 'Missing required fields: title, agentId, and schedule (or input)',
+      });
+    }
 
     // Validate cron expression
     if (!validateCronExpression(schedule)) {

@@ -4,11 +4,14 @@ import { useState, useEffect } from 'react';
 import { Plus, Clock } from 'lucide-react';
 import { useChatStore, type Automation } from '@/stores/chatStore';
 import { AutomationItem } from './AutomationItem';
+import { AutomationModal } from './AutomationModal';
 import { API_BASE_URL } from '@/lib/api';
 
 export function AutomationCenter() {
   const { automations, setAutomations } = useChatStore();
   const [loading, setLoading] = useState(true);
+  const [experts, setExperts] = useState<Array<{ id: string; name: string; title: string }>>([]);
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     const fetchAutomations = async () => {
@@ -27,6 +30,27 @@ export function AutomationCenter() {
 
     fetchAutomations();
   }, [setAutomations]);
+
+  // Fetch experts for modal dropdown
+  useEffect(() => {
+    const fetchExperts = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/experts`);
+        const data = await res.json();
+        if (data.success) {
+          setExperts(data.data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch experts:', error);
+      }
+    };
+
+    fetchExperts();
+  }, []);
+
+  const handleCreate = (automation: Automation) => {
+    setAutomations([automation, ...automations]);
+  };
 
   const handleToggleStatus = async (id: string, status: 'active' | 'paused') => {
     try {
@@ -95,12 +119,12 @@ export function AutomationCenter() {
             </p>
           </div>
           <div className="flex gap-2">
-            <button className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors">
+            <button
+              onClick={() => setModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
+            >
               <Plus className="w-4 h-4" />
               <span>添加</span>
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-neutral-700 hover:bg-neutral-600 rounded-lg transition-colors text-neutral-300">
-              <span>从模版添加</span>
             </button>
           </div>
         </div>
@@ -131,6 +155,14 @@ export function AutomationCenter() {
           </div>
         )}
       </div>
+
+      {/* Create Modal */}
+      <AutomationModal
+        open={modalOpen}
+        experts={experts}
+        onClose={() => setModalOpen(false)}
+        onSuccess={handleCreate}
+      />
     </main>
   );
 }

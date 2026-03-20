@@ -598,7 +598,8 @@ function handleAgentMessage(conversationId: string, content: string) {
           conversationId,
           item.filename || `artifact_${Date.now()}`,
           item.content,
-          item.type
+          item.type,
+          item.isReference || false
         );
 
         // Broadcast artifact creation event
@@ -689,7 +690,8 @@ function setupOrchestratorHandlers() {
                   conversationId,
                   item.filename || `artifact_${Date.now()}`,
                   item.content,
-                  item.type
+                  item.type,
+                  item.isReference || false
                 );
 
                 // Broadcast artifact creation event

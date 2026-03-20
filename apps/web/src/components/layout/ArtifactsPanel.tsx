@@ -207,15 +207,19 @@ export function ArtifactsPanel() {
               {selectedArtifact && (
                 <div className="h-48 border-t border-neutral-700 p-3">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-neutral-400">预览</span>
+                    <span className="text-xs text-neutral-400">
+                      {selectedArtifact.metadata?.isReference ? '文件引用' : '预览'}
+                    </span>
                     <div className="flex gap-1">
-                      <button
-                        onClick={handleDownload}
-                        className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200"
-                        aria-label="下载"
-                      >
-                        <Download className="w-3 h-3" />
-                      </button>
+                      {!selectedArtifact.metadata?.isReference && (
+                        <button
+                          onClick={handleDownload}
+                          className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200"
+                          aria-label="下载"
+                        >
+                          <Download className="w-3 h-3" />
+                        </button>
+                      )}
                       <button
                         onClick={handleDelete}
                         className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-red-400"
@@ -226,7 +230,13 @@ export function ArtifactsPanel() {
                     </div>
                   </div>
                   <div className="h-32 bg-neutral-900 rounded-lg p-2 overflow-auto text-xs text-neutral-300 font-mono">
-                    {selectedArtifact.content ? (
+                    {selectedArtifact.metadata?.isReference ? (
+                      <div className="flex flex-col items-center justify-center h-full text-neutral-500">
+                        <File className="w-8 h-8 mb-2 opacity-50" />
+                        <span>AI 声称已保存此文件</span>
+                        <span className="text-xs mt-1">（内容在 Gateway 端）</span>
+                      </div>
+                    ) : selectedArtifact.content ? (
                       <pre className="whitespace-pre-wrap break-all">{selectedArtifact.content}</pre>
                     ) : selectedArtifact.type === 'image' ? (
                       <img

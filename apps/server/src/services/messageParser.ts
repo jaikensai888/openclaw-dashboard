@@ -101,10 +101,11 @@ export const messageParser = new MessageParser();
 // ============ 产物提取相关 ============
 
 export interface ExtractedArtifact {
-  type: 'code' | 'image';
+  type: 'code' | 'image' | 'document';
   language?: string;
   filename?: string;
   content: string;
+  isReference?: boolean;  // 标记是否为引用（无实际内容）
 }
 
 /**
@@ -189,10 +190,62 @@ export function extractImages(content: string): ExtractedArtifact[] {
 }
 
 /**
+ * 从消息内容中提取文件保存引用
+ * 检测 AI 回复中声称保存的文件，如 "已保存到 `filename`"
+ */
+export function extractFileReferences(content: string): ExtractedArtifact[] {
+  const artifacts: ExtractedArtifact[] = [];
+
+  // 匹配各种文件保存声明的模式
+  const patterns = [
+    // 中文: 已保存到 `filename` 或 保存到 `filename`
+    /(?:已)?保存到?\s*[`「『]([^`」』]+\.[a-zA-Z0-9]+)[`」』]/g,
+    // 英文: Saved to `filename` or saved as `filename`
+    /saved\s+(?:to|as)\s+[`"']([^`"']+\.[a-zA-Z0-9]+)[`"']/gi,
+    // 通用: 文件 `filename` 已保存
+    /文件\s*[`「『]([^`」』]+\.[a-zA-Z0-9]+)[`」』]\s*已保存/g,
+    // 通用: `filename` saved
+    /[`"']([^`"']+\.[a-zA-Z0-9]+)[`"']\s*(?:已)?保存/g,
+  ];
+
+  const seenFiles = new Set<string>();
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const filename = match[1];
+
+      // 避免重复
+      if (seenFiles.has(filename)) continue;
+      seenFiles.add(filename);
+
+      // 根据文件扩展名确定类型
+      const ext = filename.split('.').pop()?.toLowerCase() || 'txt';
+      let artifactType: 'code' | 'document' = 'document';
+
+      const codeExtensions = ['js', 'ts', 'py', 'java', 'go', 'rs', 'cpp', 'c', 'html', 'css', 'json', 'yaml', 'yml', 'sql', 'sh'];
+      if (codeExtensions.includes(ext)) {
+        artifactType = 'code';
+      }
+
+      artifacts.push({
+        type: artifactType,
+        filename,
+        content: `[文件引用: ${filename}]`,  // 占位符内容
+        isReference: true,
+      });
+    }
+  }
+
+  return artifacts;
+}
+
+/**
  * 从消息内容中提取所有产物
  */
 export function extractArtifactsFromMessage(content: string): ExtractedArtifact[] {
   const codeBlocks = extractCodeBlocks(content);
   const images = extractImages(content);
-  return [...codeBlocks, ...images];
+  const fileReferences = extractFileReferences(content);
+  return [...codeBlocks, ...images, ...fileReferences];
 }

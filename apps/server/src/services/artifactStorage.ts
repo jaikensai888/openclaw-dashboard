@@ -104,19 +104,26 @@ export function saveArtifact(
   conversationId: string,
   filename: string,
   content: string | Buffer,
-  type: 'code' | 'image' | 'document' | 'other' = 'code'
+  type: 'code' | 'image' | 'document' | 'other' = 'code',
+  isReference: boolean = false
 ): Artifact {
   const id = `artifact_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
   const dir = getConversationDir(conversationId);
   const filePath = path.join(dir, filename);
 
-  // 写入文件
-  const buffer = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
-  fs.writeFileSync(filePath, buffer);
+  let fileSize = 0;
+  let mimeType = getMimeType(filename);
 
-  // 获取文件信息
-  const stats = fs.statSync(filePath);
-  const mimeType = getMimeType(filename);
+  // 如果不是引用，写入文件
+  if (!isReference) {
+    const buffer = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
+    fs.writeFileSync(filePath, buffer);
+    const stats = fs.statSync(filePath);
+    fileSize = stats.size;
+  } else {
+    // 引用类型，只记录元数据，不写文件
+    fileSize = 0;
+  }
 
   // 保存到数据库
   const now = new Date().toISOString();
@@ -129,9 +136,9 @@ export function saveArtifact(
       type,
       filename,
       type === 'code' ? (typeof content === 'string' ? content : null) : null,
-      filePath,
+      isReference ? null : filePath,
       mimeType,
-      JSON.stringify({ size: stats.size }),
+      JSON.stringify({ size: fileSize, isReference }),
       now,
       now,
     ]
@@ -143,8 +150,8 @@ export function saveArtifact(
     filename,
     type,
     mimeType,
-    size: stats.size,
-    path: filePath,
+    size: fileSize,
+    path: isReference ? '' : filePath,
     createdAt: new Date(now),
   };
 }

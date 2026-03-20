@@ -311,6 +311,66 @@ function handleMessage(type: string, payload: unknown) {
       }
       break;
 
+    case 'artifact.created':
+      {
+        const { conversationId, artifact } = payload as {
+          conversationId: string;
+          artifact: {
+            id: string;
+            conversationId: string;
+            filename: string;
+            type: 'code' | 'image' | 'document' | 'other';
+            mimeType: string;
+            size: number;
+            path: string;
+            createdAt: string;
+          };
+        };
+        store.addArtifact({
+          ...artifact,
+          type: artifact.type === 'other' ? 'file' : artifact.type,
+          title: artifact.filename,
+          createdAt: new Date(artifact.createdAt),
+          updatedAt: new Date(artifact.createdAt),
+        });
+      }
+      break;
+
+    case 'artifact.deleted':
+      {
+        const { artifactId } = payload as { artifactId: string };
+        store.removeArtifact(artifactId);
+      }
+      break;
+
+    case 'artifacts.list':
+      {
+        const { conversationId, artifacts } = payload as {
+          conversationId: string;
+          artifacts: Array<{
+            id: string;
+            conversationId: string;
+            filename: string;
+            type: 'code' | 'image' | 'document' | 'other';
+            mimeType: string;
+            size: number;
+            path: string;
+            createdAt: string;
+          }>;
+        };
+        store.loadArtifacts(
+          conversationId,
+          artifacts.map((a) => ({
+            ...a,
+            type: a.type === 'other' ? 'file' : a.type,
+            title: a.filename,
+            createdAt: new Date(a.createdAt),
+            updatedAt: new Date(a.createdAt),
+          }))
+        );
+      }
+      break;
+
     default:
       console.warn('[WS] Unknown message type:', type);
   }

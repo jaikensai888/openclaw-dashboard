@@ -56,7 +56,9 @@ export function Sidebar() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
 
   // Focus input when editing starts
   useEffect(() => {
@@ -65,6 +67,21 @@ export function Sidebar() {
       inputRef.current.select();
     }
   }, [editingId]);
+
+  // Close settings menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
+        setSettingsMenuOpen(false);
+      }
+    };
+    if (settingsMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [settingsMenuOpen]);
 
   const handleNewChat = () => {
     const id = createConversation();
@@ -238,13 +255,35 @@ export function Sidebar() {
         {/* Header */}
         <div className="p-4 border-b border-neutral-700 flex items-center justify-between">
           <h1 className="text-lg font-semibold">Openclaw</h1>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 relative" ref={settingsRef}>
             <button
-              className="p-2 min-w-[44px] min-h-[44px] rounded-lg hover:bg-neutral-700 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+              onClick={() => setSettingsMenuOpen(!settingsMenuOpen)}
+              className={cn(
+                'p-2 min-w-[44px] min-h-[44px] rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500',
+                settingsMenuOpen ? 'bg-neutral-700' : 'hover:bg-neutral-700'
+              )}
               aria-label="设置"
+              aria-expanded={settingsMenuOpen}
             >
-              <Settings className="w-4 h-4 text-neutral-400" />
+              <Settings className={cn('w-4 h-4', settingsMenuOpen ? 'text-white' : 'text-neutral-400')} />
             </button>
+
+            {/* Settings Dropdown Menu */}
+            {settingsMenuOpen && (
+              <div className="absolute top-full right-0 mt-1 w-40 bg-neutral-800 border border-neutral-700 rounded-lg shadow-lg py-1 z-50">
+                <button
+                  onClick={() => {
+                    window.location.href = '/settings/categories';
+                    setSettingsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition-colors"
+                >
+                  <Folder className="w-4 h-4" />
+                  <span>分类管理</span>
+                </button>
+              </div>
+            )}
+
             <button
               onClick={toggleSidebar}
               className="p-2 min-w-[44px] min-h-[44px] rounded-lg hover:bg-neutral-700 transition-colors md:hidden focus:outline-none focus:ring-2 focus:ring-primary-500"
@@ -309,20 +348,6 @@ export function Sidebar() {
             onClick={() => setCurrentView('automation')}
             badge="Beta"
           />
-        </div>
-
-        {/* Settings Group */}
-        <div className="px-3 py-2 space-y-1 border-b border-neutral-700">
-          <div className="px-3 py-1.5 text-xs text-neutral-500 font-medium uppercase tracking-wider">
-            设置
-          </div>
-          <button
-            onClick={() => window.location.href = '/settings/categories'}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors hover:bg-neutral-700 text-neutral-300 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            <Folder className="w-5 h-5" />
-            <span className="text-sm">分类管理</span>
-          </button>
         </div>
 
         {/* Conversations List */}

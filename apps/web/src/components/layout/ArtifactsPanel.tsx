@@ -117,15 +117,17 @@ export function ArtifactsPanel() {
         {/* Header */}
         <div className="p-4 border-b border-neutral-700">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="min-w-0 flex-1">
               <h2 className="text-sm font-medium text-neutral-200">产物面板</h2>
               {currentConversationId && (
-                <p className="text-xs text-neutral-500 mt-0.5">当前会话</p>
+                <p className="text-xs text-neutral-500 mt-0.5 truncate" title={`data/conversations/${currentConversationId}/`}>
+                  📁 data/conversations/{currentConversationId}/
+                </p>
               )}
             </div>
             <button
               onClick={() => setArtifactsPanelOpen(false)}
-              className="p-1.5 hover:bg-neutral-700 rounded-lg transition-colors"
+              className="p-1.5 hover:bg-neutral-700 rounded-lg transition-colors flex-shrink-0 ml-2"
               aria-label="关闭面板"
             >
               <X className="w-4 h-4 text-neutral-400" />

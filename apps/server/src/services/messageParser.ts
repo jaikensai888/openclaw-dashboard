@@ -242,10 +242,10 @@ export function extractFileReferences(content: string): ExtractedArtifact[] {
 
 /**
  * 从消息内容中提取所有产物
+ * 只提取有实际内容的产物（代码块和图片）
  */
 export function extractArtifactsFromMessage(content: string): ExtractedArtifact[] {
   const codeBlocks = extractCodeBlocks(content);
   const images = extractImages(content);
-  const fileReferences = extractFileReferences(content);
-  return [...codeBlocks, ...images, ...fileReferences];
+  return [...codeBlocks, ...images];
 }

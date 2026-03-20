@@ -196,6 +196,9 @@ interface ChatState {
   // 新增：产物相关状态
   artifacts: Artifact[];
   setArtifacts: (artifacts: Artifact[]) => void;
+  loadArtifacts: (conversationId: string, artifacts: Artifact[]) => void;
+  addArtifact: (artifact: Artifact) => void;
+  removeArtifact: (artifactId: string) => void;
   selectedArtifactId: string | null;
   setSelectedArtifactId: (id: string | null) => void;
 
@@ -561,9 +564,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
   automations: [],
   setAutomations: (automations) => set({ automations }),
 
-  // 产物相关状态
+  // 产物相关状态 - 按 conversationId 分组
   artifacts: [],
   setArtifacts: (artifacts) => set({ artifacts }),
+
+  // 当前会话的产物（computed）
+  get currentConversationArtifacts() {
+    const state = get();
+    if (!state.currentConversationId) return [];
+    return state.artifacts.filter((a) => a.conversationId === state.currentConversationId);
+  },
+
+  // 加载指定会话的产物
+  loadArtifacts: (conversationId, artifacts) => set((state) => {
+    // 过滤掉旧的会话产物，添加新的
+    const otherArtifacts = state.artifacts.filter((a) => a.conversationId !== conversationId);
+    return { artifacts: [...otherArtifacts, ...artifacts] };
+  }),
+
+  // 添加单个产物
+  addArtifact: (artifact) => set((state) => ({
+    artifacts: [...state.artifacts, artifact],
+  })),
+
+  // 移除产物
+  removeArtifact: (artifactId) => set((state) => ({
+    artifacts: state.artifacts.filter((a) => a.id !== artifactId),
+  })),
+
   selectedArtifactId: null,
   setSelectedArtifactId: (id) => set({ selectedArtifactId: id }),
 

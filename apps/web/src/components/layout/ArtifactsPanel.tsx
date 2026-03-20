@@ -1,19 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { X, FileText, Code, Image, File, Download, Trash2 } from 'lucide-react';
+import { X, FileText, Code, Image, File, Download, Trash2, ArrowLeft } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/api';
 
-type TabType = 'artifacts' | 'files' | 'changes' | 'preview';
-
-const tabs: { id: TabType; label: string }[] = [
-  { id: 'artifacts', label: '产物' },
-  { id: 'files', label: '全部文件' },
-  { id: 'changes', label: '变更' },
-  { id: 'preview', label: '预览' },
-];
+type ViewMode = 'list' | 'preview';
 
 export function ArtifactsPanel() {
   const {
@@ -25,7 +18,7 @@ export function ArtifactsPanel() {
     currentConversationId,
   } = useChatStore();
 
-  const [activeTab, setActiveTab] = useState<TabType>('artifacts');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   if (!artifactsPanelOpen) return null;
 
@@ -90,9 +83,87 @@ export function ArtifactsPanel() {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error('删除失败');
+      // Clear selection and go back to list
+      setSelectedArtifactId(null);
+      setViewMode('list');
     } catch (error) {
       console.error('Delete failed:', error);
     }
+  };
+
+  const handleSelectArtifact = (artifactId: string) => {
+    setSelectedArtifactId(artifactId);
+    setViewMode('preview');
+  };
+
+  const handleBackToList = () => {
+    setViewMode('list');
+    setSelectedArtifactId(null);
+  };
+
+  // Render preview content based on file type
+  const renderPreviewContent = () => {
+    if (!selectedArtifact) return null;
+
+    if (selectedArtifact.metadata?.isReference) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
+          <File className="w-12 h-12 mb-3 opacity-50" />
+          <span className="text-sm">AI 声称已保存此文件</span>
+          <span className="text-xs mt-1 text-neutral-600">（内容在 Gateway 端）</span>
+        </div>
+      );
+    }
+
+    if (selectedArtifact.type === 'image') {
+      return (
+        <div className="flex items-center justify-center h-full p-4">
+          <img
+            src={`${API_BASE_URL}/artifacts/${selectedArtifact.id}/preview`}
+            alt={selectedArtifact.title || 'Preview'}
+            className="max-w-full max-h-full object-contain rounded"
+          />
+        </div>
+      );
+    }
+
+    if (selectedArtifact.content) {
+      // Check if it's markdown
+      const isMarkdown = selectedArtifact.title?.endsWith('.md') || selectedArtifact.type === 'document';
+
+      if (isMarkdown) {
+        // Simple markdown rendering - just show as formatted text
+        return (
+          <div className="p-4 prose prose-invert prose-sm max-w-none overflow-auto h-full">
+            <pre className="whitespace-pre-wrap text-sm text-neutral-300 font-mono">
+              {selectedArtifact.content}
+            </pre>
+          </div>
+        );
+      }
+
+      // Code preview
+      return (
+        <div className="p-4 overflow-auto h-full">
+          <pre className="text-xs text-neutral-300 font-mono whitespace-pre-wrap break-all">
+            {selectedArtifact.content}
+          </pre>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
+        <File className="w-12 h-12 mb-3 opacity-50" />
+        <span className="text-sm">无预览内容</span>
+        <button
+          onClick={handleDownload}
+          className="mt-3 px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-xs text-neutral-300 transition-colors"
+        >
+          下载文件
+        </button>
+      </div>
+    );
   };
 
   return (
@@ -117,70 +188,92 @@ export function ArtifactsPanel() {
         {/* Header */}
         <div className="p-4 border-b border-neutral-700">
           <div className="flex items-center justify-between">
-            <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-medium text-neutral-200">产物面板</h2>
-              {currentConversationId && (
-                <p className="text-xs text-neutral-500 mt-0.5 truncate" title={`data/conversations/${currentConversationId}/`}>
-                  📁 data/conversations/{currentConversationId}/
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => setArtifactsPanelOpen(false)}
-              className="p-1.5 hover:bg-neutral-700 rounded-lg transition-colors flex-shrink-0 ml-2"
-              aria-label="关闭面板"
-            >
-              <X className="w-4 h-4 text-neutral-400" />
-            </button>
+            {viewMode === 'preview' ? (
+              <>
+                <button
+                  onClick={handleBackToList}
+                  className="flex items-center gap-1.5 text-neutral-300 hover:text-neutral-100 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="text-sm">返回</span>
+                </button>
+                <div className="flex items-center gap-1">
+                  {!selectedArtifact?.metadata?.isReference && (
+                    <button
+                      onClick={handleDownload}
+                      className="p-1.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200 transition-colors"
+                      aria-label="下载"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDelete}
+                    className="p-1.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-red-400 transition-colors"
+                    aria-label="删除"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setArtifactsPanelOpen(false)}
+                    className="p-1.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200 transition-colors"
+                    aria-label="关闭面板"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-sm font-medium text-neutral-200">产物面板</h2>
+                  {currentConversationId && (
+                    <p className="text-xs text-neutral-500 mt-0.5 truncate" title={`data/conversations/${currentConversationId}/`}>
+                      📁 data/conversations/{currentConversationId}/
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setArtifactsPanelOpen(false)}
+                  className="p-1.5 hover:bg-neutral-700 rounded-lg transition-colors flex-shrink-0 ml-2"
+                  aria-label="关闭面板"
+                >
+                  <X className="w-4 h-4 text-neutral-400" />
+                </button>
+              </>
+            )}
           </div>
-        </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-neutral-700">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex-1 px-3 py-2.5 text-xs font-medium transition-colors',
-                activeTab === tab.id
-                  ? 'text-primary-400 border-b-2 border-primary-400'
-                  : 'text-neutral-400 hover:text-neutral-200'
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {/* Preview mode: show filename */}
+          {viewMode === 'preview' && selectedArtifact && (
+            <div className="mt-2 pt-2 border-t border-neutral-700">
+              <p className="text-sm font-medium text-neutral-200 truncate">{selectedArtifact.title}</p>
+            </div>
+          )}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          {artifacts.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm p-4 text-center">
-              <div>
-                <File className="w-12 h-12 mx-auto mb-3 opacity-30" aria-hidden="true" />
-                <p>尚无产物生成</p>
-                <p className="text-xs mt-1">AI 生成的代码将自动保存</p>
+          {viewMode === 'list' ? (
+            // List view
+            currentConversationArtifacts.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm p-4 text-center">
+                <div>
+                  <File className="w-12 h-12 mx-auto mb-3 opacity-30" aria-hidden="true" />
+                  <p>尚无产物生成</p>
+                  <p className="text-xs mt-1">AI 生成的代码将自动保存</p>
+                </div>
               </div>
-            </div>
-          ) : (
-            <>
-              {/* Artifact List */}
+            ) : (
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                {artifacts.map((artifact) => {
+                {currentConversationArtifacts.map((artifact) => {
                   const Icon = getArtifactIcon(artifact.type);
-                  const isSelected = artifact.id === selectedArtifactId;
 
                   return (
                     <button
                       key={artifact.id}
-                      onClick={() => setSelectedArtifactId(artifact.id)}
-                      className={cn(
-                        'w-full text-left p-3 rounded-lg transition-colors',
-                        isSelected
-                          ? 'bg-primary-600/20 border border-primary-500/50'
-                          : 'bg-neutral-700/50 hover:bg-neutral-700 border border-transparent'
-                      )}
+                      onClick={() => handleSelectArtifact(artifact.id)}
+                      className="w-full text-left p-3 rounded-lg bg-neutral-700/50 hover:bg-neutral-700 border border-transparent transition-colors"
                     >
                       <div className="flex items-start gap-3">
                         <Icon className="w-5 h-5 text-primary-400 flex-shrink-0 mt-0.5" />
@@ -204,55 +297,12 @@ export function ArtifactsPanel() {
                   );
                 })}
               </div>
-
-              {/* Preview Area */}
-              {selectedArtifact && (
-                <div className="h-48 border-t border-neutral-700 p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs text-neutral-400">
-                      {selectedArtifact.metadata?.isReference ? '文件引用' : '预览'}
-                    </span>
-                    <div className="flex gap-1">
-                      {!selectedArtifact.metadata?.isReference && (
-                        <button
-                          onClick={handleDownload}
-                          className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200"
-                          aria-label="下载"
-                        >
-                          <Download className="w-3 h-3" />
-                        </button>
-                      )}
-                      <button
-                        onClick={handleDelete}
-                        className="p-1 hover:bg-neutral-700 rounded text-neutral-400 hover:text-red-400"
-                        aria-label="删除"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="h-32 bg-neutral-900 rounded-lg p-2 overflow-auto text-xs text-neutral-300 font-mono">
-                    {selectedArtifact.metadata?.isReference ? (
-                      <div className="flex flex-col items-center justify-center h-full text-neutral-500">
-                        <File className="w-8 h-8 mb-2 opacity-50" />
-                        <span>AI 声称已保存此文件</span>
-                        <span className="text-xs mt-1">（内容在 Gateway 端）</span>
-                      </div>
-                    ) : selectedArtifact.content ? (
-                      <pre className="whitespace-pre-wrap break-all">{selectedArtifact.content}</pre>
-                    ) : selectedArtifact.type === 'image' ? (
-                      <img
-                        src={`${API_BASE_URL}/artifacts/${selectedArtifact.id}/preview`}
-                        alt={selectedArtifact.title || 'Preview'}
-                        className="max-w-full max-h-full object-contain"
-                      />
-                    ) : (
-                      <span className="text-neutral-500">双击下载查看完整内容</span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </>
+            )
+          ) : (
+            // Preview view
+            <div className="flex-1 overflow-hidden bg-neutral-900">
+              {renderPreviewContent()}
+            </div>
           )}
         </div>
       </aside>

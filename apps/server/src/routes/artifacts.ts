@@ -259,4 +259,62 @@ export async function artifactRoutes(fastify: FastifyInstance) {
       .header('Cache-Control', 'public, max-age=3600')
       .send(content);
   });
+
+  // Get artifact content as JSON (for frontend preview)
+  fastify.get<{ Params: { id: string } }>('/artifacts/:id/content', async (request, reply) => {
+    const { id } = request.params;
+    const row = get<ArtifactRow>('SELECT * FROM artifacts WHERE id = ?', [id]);
+
+    if (!row) {
+      return reply.status(404).send({ success: false, error: 'Artifact not found' });
+    }
+
+    // Check metadata for reference type
+    const metadata = row.metadata ? JSON.parse(row.metadata) : {};
+    if (metadata.isReference) {
+      return {
+        success: true,
+        data: {
+          id: row.id,
+          title: row.title,
+          type: row.type,
+          mimeType: row.mime_type,
+          content: null,
+          isReference: true,
+        },
+      };
+    }
+
+    // Try to get file from storage
+    const storedArtifact = await getStoredArtifact(id);
+    if (storedArtifact) {
+      const content = await readArtifactContent(id);
+      if (content !== null) {
+        return {
+          success: true,
+          data: {
+            id: row.id,
+            title: storedArtifact.filename,
+            type: row.type,
+            mimeType: storedArtifact.mimeType,
+            content: content.toString('utf-8'),
+            isReference: false,
+          },
+        };
+      }
+    }
+
+    // Fallback to database content
+    return {
+      success: true,
+      data: {
+        id: row.id,
+        title: row.title,
+        type: row.type,
+        mimeType: row.mime_type,
+        content: row.content,
+        isReference: false,
+      },
+    };
+  });
 }

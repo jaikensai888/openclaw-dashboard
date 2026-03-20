@@ -1,12 +1,21 @@
 'use client';
 
-import { useState } from 'react';
-import { X, FileText, Code, Image, File, Download, Trash2, ArrowLeft } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { X, FileText, Code, Image, File, Download, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/api';
 
 type ViewMode = 'list' | 'preview';
+
+interface ArtifactContent {
+  id: string;
+  title: string;
+  type: string;
+  mimeType: string;
+  content: string | null;
+  isReference: boolean;
+}
 
 export function ArtifactsPanel() {
   const {
@@ -19,6 +28,9 @@ export function ArtifactsPanel() {
   } = useChatStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [previewContent, setPreviewContent] = useState<ArtifactContent | null>(null);
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const [contentError, setContentError] = useState<string | null>(null);
 
   if (!artifactsPanelOpen) return null;
 
@@ -86,26 +98,72 @@ export function ArtifactsPanel() {
       // Clear selection and go back to list
       setSelectedArtifactId(null);
       setViewMode('list');
+      setPreviewContent(null);
     } catch (error) {
       console.error('Delete failed:', error);
     }
   };
 
-  const handleSelectArtifact = (artifactId: string) => {
+  const handleSelectArtifact = async (artifactId: string) => {
     setSelectedArtifactId(artifactId);
     setViewMode('preview');
+    setIsLoadingContent(true);
+    setContentError(null);
+    setPreviewContent(null);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/artifacts/${artifactId}/content`);
+      const data = await res.json();
+      if (data.success) {
+        setPreviewContent(data.data);
+      } else {
+        setContentError(data.error || '加载失败');
+      }
+    } catch (error) {
+      console.error('Failed to load artifact content:', error);
+      setContentError('加载内容失败');
+    } finally {
+      setIsLoadingContent(false);
+    }
   };
 
   const handleBackToList = () => {
     setViewMode('list');
     setSelectedArtifactId(null);
+    setPreviewContent(null);
+    setContentError(null);
   };
 
   // Render preview content based on file type
   const renderPreviewContent = () => {
-    if (!selectedArtifact) return null;
+    if (isLoadingContent) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
+          <Loader2 className="w-8 h-8 mb-3 animate-spin" />
+          <span className="text-sm">加载中...</span>
+        </div>
+      );
+    }
 
-    if (selectedArtifact.metadata?.isReference) {
+    if (contentError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
+          <File className="w-12 h-12 mb-3 opacity-50" />
+          <span className="text-sm text-red-400">{contentError}</span>
+        </div>
+      );
+    }
+
+    if (!previewContent) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
+          <File className="w-12 h-12 mb-3 opacity-50" />
+          <span className="text-sm">无内容</span>
+        </div>
+      );
+    }
+
+    if (previewContent.isReference) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
           <File className="w-12 h-12 mb-3 opacity-50" />
@@ -115,28 +173,27 @@ export function ArtifactsPanel() {
       );
     }
 
-    if (selectedArtifact.type === 'image') {
+    if (previewContent.type === 'image') {
       return (
         <div className="flex items-center justify-center h-full p-4">
           <img
-            src={`${API_BASE_URL}/artifacts/${selectedArtifact.id}/preview`}
-            alt={selectedArtifact.title || 'Preview'}
+            src={`${API_BASE_URL}/artifacts/${previewContent.id}/preview`}
+            alt={previewContent.title || 'Preview'}
             className="max-w-full max-h-full object-contain rounded"
           />
         </div>
       );
     }
 
-    if (selectedArtifact.content) {
+    if (previewContent.content) {
       // Check if it's markdown
-      const isMarkdown = selectedArtifact.title?.endsWith('.md') || selectedArtifact.type === 'document';
+      const isMarkdown = previewContent.title?.endsWith('.md') || previewContent.type === 'document';
 
       if (isMarkdown) {
-        // Simple markdown rendering - just show as formatted text
         return (
           <div className="p-4 prose prose-invert prose-sm max-w-none overflow-auto h-full">
             <pre className="whitespace-pre-wrap text-sm text-neutral-300 font-mono">
-              {selectedArtifact.content}
+              {previewContent.content}
             </pre>
           </div>
         );
@@ -146,7 +203,7 @@ export function ArtifactsPanel() {
       return (
         <div className="p-4 overflow-auto h-full">
           <pre className="text-xs text-neutral-300 font-mono whitespace-pre-wrap break-all">
-            {selectedArtifact.content}
+            {previewContent.content}
           </pre>
         </div>
       );

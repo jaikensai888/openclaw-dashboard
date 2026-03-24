@@ -50,6 +50,7 @@ export async function initDatabase(config: DbConfig): Promise<SqlJsDatabase> {
   // Seed default data
   seedDefaultExperts();
   seedDefaultCategories();
+  seedDefaultRules();
 
   // Save initial state
   saveDatabase();
@@ -221,6 +222,28 @@ function runMigrations(database: SqlJsDatabase): void {
   } catch (err) {
     console.error('[DB] Migration error:', err);
   }
+
+  // Migration 8: Create rules table if not exists
+  try {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS rules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        template TEXT NOT NULL,
+        variables TEXT,
+        is_enabled INTEGER DEFAULT 1,
+        priority INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(is_enabled)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority)`);
+    console.log('[DB] Migration: rules table created');
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
 }
 
 export function closeDatabase(): void {
@@ -379,4 +402,65 @@ export function seedDefaultCategories(): void {
   });
 
   console.log('[DB] Default categories seeded');
+}
+
+/**
+ * Seed default rules if none exist
+ */
+export function seedDefaultRules(): void {
+  const count = get<{ count: number }>('SELECT COUNT(*) as count FROM rules');
+  if (count && count.count > 0) {
+    return; // Already seeded
+  }
+
+  console.log('[DB] Seeding default rules...');
+  const now = new Date().toISOString();
+  const cwd = process.cwd();
+
+  const defaultRules = [
+    {
+      id: 'rule_file_save_protocol',
+      name: '文件保存协议',
+      description: '定义文件保存的工作目录和标记格式',
+      template: `## 文件保存协议
+你的工作目录是: \${{workDir}}/
+
+当你保存文件时，必须：
+1. 将文件保存到工作目录（绝对路径）: \${{workDir}}/
+2. 在消息末尾添加标记: [FILE_SAVED: 文件名或相对路径]
+
+例如：
+- 保存 notes.md 到 \${{workDir}}/notes.md，消息中添加 [FILE_SAVED: notes.md]
+- 保存 src/utils/helper.ts 到 \${{workDir}}/src/utils/helper.ts，消息中添加 [FILE_SAVED: src/utils/helper.ts]
+
+注意事项：
+1. 只有在用户确认后才保存文件
+2. 所有文件必须保存到工作目录 \${{workDir}}/（这是绝对路径）
+3. 每个保存的文件单独一行标记
+4. 标记会被系统自动解析，不会显示给用户`,
+      variables: JSON.stringify(['conversationId', 'workDir', 'cwd']),
+      is_enabled: 1,
+      priority: 100,
+    },
+  ];
+
+  for (const rule of defaultRules) {
+    run(
+      `INSERT INTO rules (id, name, description, template, variables, is_enabled, priority, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        rule.id,
+        rule.name,
+        rule.description,
+        rule.template,
+        rule.variables,
+        rule.is_enabled,
+        rule.priority,
+        now,
+        now,
+      ]
+    );
+  }
+
+  console.log('[DB] Default rules seeded');
 }

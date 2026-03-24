@@ -112,3 +112,20 @@ CREATE INDEX IF NOT EXISTS idx_experts_category ON experts(category);
 CREATE INDEX IF NOT EXISTS idx_automations_status ON automations(status);
 CREATE INDEX IF NOT EXISTS idx_artifacts_conversation ON artifacts(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id);
+
+-- Rules table (会话初始化规则)
+CREATE TABLE IF NOT EXISTS rules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    template TEXT NOT NULL,
+    variables TEXT,
+    is_enabled INTEGER DEFAULT 1,
+    priority INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Rules indexes
+CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority);

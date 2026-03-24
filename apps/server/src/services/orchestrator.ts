@@ -30,6 +30,36 @@ import {
   buildHandoffContext,
   isHandoffDepthValid,
 } from './handoffParser.js';
+import { renderRulesForConversation } from './ruleService.js';
+
+/**
+ * 构建文件保存协议指令，注入到所有 agent 的 system prompt
+ * @param conversationId 会话 ID，用于确定工作目录
+ * @deprecated 已迁移到 ruleService.renderRulesForConversation
+ */
+function buildFileSavedProtocol(conversationId: string): string {
+  // 使用绝对路径，确保 Openclaw 保存到 Dashboard 可访问的目录
+  const workDir = `${process.cwd()}/data/conversations/${conversationId}`;
+
+  return `
+
+## 文件保存协议
+你的工作目录是: ${workDir}/
+
+当你保存文件时，必须：
+1. 将文件保存到工作目录（绝对路径）: ${workDir}/
+2. 在消息末尾添加标记: [FILE_SAVED: 文件名或相对路径]
+
+例如：
+- 保存 notes.md 到 ${workDir}/notes.md，消息中添加 [FILE_SAVED: notes.md]
+- 保存 src/utils/helper.ts 到 ${workDir}/src/utils/helper.ts，消息中添加 [FILE_SAVED: src/utils/helper.ts]
+
+注意事项：
+1. 只有在用户确认后才保存文件
+2. 所有文件必须保存到工作目录 ${workDir}/（这是绝对路径）
+3. 每个保存的文件单独一行标记
+4. 标记会被系统自动解析，不会显示给用户`;
+}
 
 export interface HandleUserMessageOptions {
   conversationId: string;
@@ -254,10 +284,13 @@ export class Orchestrator {
     }
 
     try {
+      // 注入启用的规则到 systemPrompt（包含实际工作目录）
+      const enhancedSystemPrompt = (systemPrompt || agent.systemPrompt) + renderRulesForConversation(conversationId);
+
       const options: RunAgentOptions = {
         conversationId,
         virtualAgentId: agent.id,
-        systemPrompt: systemPrompt || agent.systemPrompt,
+        systemPrompt: enhancedSystemPrompt,
         userMessage: content,
         history,
         model: agent.model,
@@ -350,10 +383,13 @@ export class Orchestrator {
     const gateway = getGatewayClient();
     if (gateway?.isConnected()) {
       try {
+        // 注入启用的规则到 handoff agent 的 systemPrompt
+        const enhancedSystemPrompt = toAgent.systemPrompt + renderRulesForConversation(conversationId);
+
         const result = await gateway.runAgent({
           conversationId,
           virtualAgentId: toAgent.id,
-          systemPrompt: toAgent.systemPrompt,
+          systemPrompt: enhancedSystemPrompt,
           userMessage: handoffContext,
           model: toAgent.model,
         });

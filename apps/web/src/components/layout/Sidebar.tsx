@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check, Search, Bot, Users, Clock, Folder } from 'lucide-react';
+import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check, Search, Bot, Users, Clock, Folder, FileText } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
@@ -280,6 +280,16 @@ export function Sidebar() {
                 >
                   <Folder className="w-4 h-4" />
                   <span>分类管理</span>
+                </button>
+                <button
+                  onClick={() => {
+                    window.location.href = '/settings/rules';
+                    setSettingsMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition-colors"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>规则管理</span>
                 </button>
               </div>
             )}

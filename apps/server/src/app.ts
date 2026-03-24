@@ -13,6 +13,7 @@ import { artifactRoutes } from './routes/artifacts.js';
 import { expertRoutes } from './routes/experts.js';
 import { categoryRoutes } from './routes/categories.js';
 import { automationRoutes } from './routes/automations.js';
+import { rulesRoutes } from './routes/rules.js';
 import { websocketRoutes } from './routes/websocket.js';
 import { pluginRoutes } from './routes/plugin.js';
 import { pluginManager } from './services/pluginManager.js';
@@ -126,6 +127,7 @@ export async function createApp(config: Partial<AppConfig> = {}) {
     api.register(expertRoutes);
     api.register(categoryRoutes);
     api.register(automationRoutes);
+    api.register(rulesRoutes);
   }, { prefix: '/api/v1' });
 
   // WebSocket routes

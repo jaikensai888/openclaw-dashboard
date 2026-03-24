@@ -2,6 +2,7 @@
  * Frontend WebSocket Routes
  */
 
+import fs from 'fs';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,7 +18,7 @@ import {
   deleteConversationArtifacts,
   type Artifact,
 } from '../services/artifactStorage.js';
-import { extractArtifactsFromMessage } from '../services/messageParser.js';
+import { parseFileSavedMarkers } from '../services/messageParser.js';
 import type { TaskType, WSChatSendWithAgentPayload, VirtualAgentId } from '@openclaw-dashboard/shared';
 
 interface ClientConnection {
@@ -482,7 +483,10 @@ function setupPluginMessageHandlers() {
 }
 
 function handleAgentMessage(conversationId: string, content: string) {
-  const parsed = messageParser.parse(content);
+  // 先解析文件保存标记，获取清理后的内容
+  const { filePaths, cleanContent: contentWithoutMarkers } = parseFileSavedMarkers(content);
+
+  const parsed = messageParser.parse(contentWithoutMarkers);
   const messageId = `msg_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
   const now = new Date().toISOString();
 
@@ -581,14 +585,14 @@ function handleAgentMessage(conversationId: string, content: string) {
     run(
       `INSERT INTO messages (id, conversation_id, role, content, message_type, created_at)
        VALUES (?, ?, 'assistant', ?, 'text', ?)`,
-      [messageId, conversationId, content, now]
+      [messageId, conversationId, contentWithoutMarkers, now]
     );
 
     broadcast('chat.message', {
       id: messageId,
       conversationId,
       role: 'assistant',
-      content,
+      content: contentWithoutMarkers,
       messageType: 'text',
       createdAt: now,
     });
@@ -596,26 +600,56 @@ function handleAgentMessage(conversationId: string, content: string) {
 
   run(`UPDATE conversations SET updated_at = ? WHERE id = ?`, [now, conversationId]);
 
-  // Extract and save artifacts from message content
-  if (content) {
-    const extracted = extractArtifactsFromMessage(content);
-    for (const item of extracted) {
+  // 处理 FILE_SAVED 标记，记录到产物表（仅路径引用，不保存内容）
+  if (filePaths.length > 0) {
+    for (const filePath of filePaths) {
       try {
+        // 从路径提取文件名
+        const filename = filePath.split('/').pop() || filePath;
+
+        // 确定文件类型
+        const ext = filename.split('.').pop()?.toLowerCase() || '';
+        let artifactType: 'code' | 'image' | 'document' | 'other' = 'document';
+        const codeExtensions = ['js', 'ts', 'py', 'java', 'go', 'rs', 'cpp', 'c', 'html', 'css', 'json', 'yaml', 'yml', 'sql', 'sh'];
+        const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
+
+        if (codeExtensions.includes(ext)) {
+          artifactType = 'code';
+        } else if (imageExtensions.includes(ext)) {
+          artifactType = 'image';
+        }
+
+        // 构建完整文件路径
+        const fullPath = `${process.cwd()}/data/conversations/${conversationId}/${filePath}`;
+
+        // 检查文件是否已存在（AI 可能已经保存了）
+        const fileExists = fs.existsSync(fullPath);
+
+        // 如果文件已存在，只注册元数据，不写入文件（避免覆盖 AI 保存的内容）
+        // 如果文件不存在，创建空文件占位（等待后续同步）
         const artifact = saveArtifact(
           conversationId,
-          item.filename || `artifact_${Date.now()}`,
-          item.content,
-          item.type,
-          item.isReference || false
+          filename,
+          '',
+          artifactType,
+          fileExists // 文件存在时标记为引用，避免写入覆盖
+        );
+
+        // 更新 file_path 为完整路径，并设置正确的 isReference
+        run(
+          'UPDATE artifacts SET file_path = ?, metadata = ? WHERE id = ?',
+          [fullPath, JSON.stringify({ size: fileExists ? fs.statSync(fullPath).size : 0, isReference: false }), artifact.id]
         );
 
         // Broadcast artifact creation event
         broadcast('artifact.created', {
           conversationId,
-          artifact,
+          artifact: { ...artifact, path: fullPath },
         });
+
+        console.log(`[WS] Artifact registered: ${filePath}`);
       } catch (error) {
-        console.error('[WS] Failed to save artifact:', error);
+        console.error('[WS] Failed to register artifact:', error);
       }
     }
   }
@@ -668,13 +702,17 @@ function setupOrchestratorHandlers() {
       case 'agent.message':
         {
           const { content } = data as { content: string };
+
+          // 解析文件保存标记
+          const { filePaths, cleanContent } = parseFileSavedMarkers(content);
+
           const messageId = `msg_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
           const now = new Date().toISOString();
 
           run(
             `INSERT INTO messages (id, conversation_id, role, content, message_type, created_at)
              VALUES (?, ?, 'assistant', ?, 'text', ?)`,
-            [messageId, conversationId, content, now]
+            [messageId, conversationId, cleanContent, now]
           );
 
           run(`UPDATE conversations SET updated_at = ? WHERE id = ?`, [now, conversationId]);
@@ -683,31 +721,54 @@ function setupOrchestratorHandlers() {
             id: messageId,
             conversationId,
             role: 'assistant',
-            content,
+            content: cleanContent,
             messageType: 'text',
             createdAt: now,
           });
 
-          // Extract and save artifacts from message content
-          if (content) {
-            const extracted = extractArtifactsFromMessage(content);
-            for (const item of extracted) {
+          // 处理 FILE_SAVED 标记
+          if (filePaths.length > 0) {
+            for (const filePath of filePaths) {
               try {
+                const filename = filePath.split('/').pop() || filePath;
+                const ext = filename.split('.').pop()?.toLowerCase() || '';
+                let artifactType: 'code' | 'image' | 'document' | 'other' = 'document';
+                const codeExtensions = ['js', 'ts', 'py', 'java', 'go', 'rs', 'cpp', 'c', 'html', 'css', 'json', 'yaml', 'yml', 'sql', 'sh'];
+                const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
+
+                if (codeExtensions.includes(ext)) {
+                  artifactType = 'code';
+                } else if (imageExtensions.includes(ext)) {
+                  artifactType = 'image';
+                }
+
+                const fullPath = `${process.cwd()}/data/conversations/${conversationId}/${filePath}`;
+
+                // 检查文件是否已存在（AI 可能已经保存了）
+                const fileExists = fs.existsSync(fullPath);
+
                 const artifact = saveArtifact(
                   conversationId,
-                  item.filename || `artifact_${Date.now()}`,
-                  item.content,
-                  item.type,
-                  item.isReference || false
+                  filename,
+                  '',
+                  artifactType,
+                  fileExists // 文件存在时标记为引用，避免写入覆盖
                 );
 
-                // Broadcast artifact creation event
+                // 更新 file_path 和 metadata
+                run(
+                  'UPDATE artifacts SET file_path = ?, metadata = ? WHERE id = ?',
+                  [fullPath, JSON.stringify({ size: fileExists ? fs.statSync(fullPath).size : 0, isReference: false }), artifact.id]
+                );
+
                 broadcast('artifact.created', {
                   conversationId,
-                  artifact,
+                  artifact: { ...artifact, path: fullPath },
                 });
+
+                console.log(`[Orchestrator] Artifact registered: ${filePath}`);
               } catch (error) {
-                console.error('[Orchestrator] Failed to save artifact:', error);
+                console.error('[Orchestrator] Failed to register artifact:', error);
               }
             }
           }

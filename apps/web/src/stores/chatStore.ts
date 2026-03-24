@@ -582,10 +582,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return { artifacts: [...otherArtifacts, ...artifacts] };
   }),
 
-  // 添加单个产物
-  addArtifact: (artifact) => set((state) => ({
-    artifacts: [...state.artifacts, artifact],
-  })),
+  // 添加单个产物（带去重）
+  addArtifact: (artifact) => set((state) => {
+    // 检查是否已存在相同 ID 的产物
+    if (state.artifacts.some(a => a.id === artifact.id)) {
+      console.log(`[Store] Skipping duplicate artifact: ${artifact.id}`);
+      return state;
+    }
+    return { artifacts: [...state.artifacts, artifact] };
+  }),
 
   // 移除产物
   removeArtifact: (artifactId) => set((state) => ({

@@ -249,3 +249,34 @@ export function extractArtifactsFromMessage(content: string): ExtractedArtifact[
   const images = extractImages(content);
   return [...codeBlocks, ...images];
 }
+
+// ============ 文件保存标记解析 ============
+
+/**
+ * 文件保存标记正则
+ */
+const FILE_SAVED_PATTERN = /\[FILE_SAVED:\s*([^\]]+)\]/g;
+
+/**
+ * 解析文件保存标记
+ * 返回保存的文件路径列表和清理后的内容
+ */
+export function parseFileSavedMarkers(content: string): {
+  filePaths: string[];
+  cleanContent: string;
+} {
+  const filePaths: string[] = [];
+  let match;
+
+  while ((match = FILE_SAVED_PATTERN.exec(content)) !== null) {
+    const filePath = match[1].trim();
+    if (filePath) {
+      filePaths.push(filePath);
+    }
+  }
+
+  // 移除标记，清理内容
+  const cleanContent = content.replace(FILE_SAVED_PATTERN, '').trim();
+
+  return { filePaths, cleanContent };
+}

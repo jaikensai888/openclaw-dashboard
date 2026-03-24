@@ -165,9 +165,10 @@ export class OpenclawGatewayClient {
       messageContent = `[系统指令: ${options.systemPrompt}]\n\n${messageContent}`;
     }
 
+    const agentId = options.virtualAgentId || 'main';
     const result = await this.sendRequest('agent', {
       idempotencyKey: `dash_${options.conversationId}_${Date.now()}`,
-      to: 'dashboard',
+      sessionKey: `agent:${agentId}:main`,
       message: messageContent,
     });
 

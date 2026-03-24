@@ -2,7 +2,22 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import type { Message, Task, TaskOutput } from '@openclaw-dashboard/shared';
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
+// 动态生成 WebSocket URL，使用当前页面的 hostname
+function getWebSocketUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  // 在浏览器环境中，使用当前页面的 hostname
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const port = process.env.NEXT_PUBLIC_SERVER_PORT || '3002';
+    return `${protocol}//${window.location.hostname}:${port}/ws`;
+  }
+  // SSR 时使用默认值
+  return 'ws://localhost:3002/ws';
+}
+
+const WS_URL = getWebSocketUrl();
 
 // WebSocket manager state
 interface WSState {

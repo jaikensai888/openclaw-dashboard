@@ -4,20 +4,34 @@ import type { Message, Task, TaskOutput } from '@openclaw-dashboard/shared';
 
 // 动态生成 WebSocket URL，使用当前页面的 hostname
 function getWebSocketUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) {
-    return process.env.NEXT_PUBLIC_WS_URL;
+  // 优先使用环境变量
+  const envUrl = process.env.NEXT_PUBLIC_WS_URL;
+  if (envUrl) {
+    return envUrl;
   }
-  // 在浏览器环境中，使用当前页面的 hostname
-  if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const port = process.env.NEXT_PUBLIC_SERVER_PORT || '3002';
-    return `${protocol}//${window.location.hostname}:${port}/ws`;
+
+  // 运行时动态检测浏览器环境
+  // 直接使用 self 或 window，避免 webpack 静态分析问题
+  // self 在浏览器和 Web Worker 中都可用
+  try {
+    // @ts-expect-error - 动态访问
+    const location = self?.location || window?.location;
+    if (location) {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const port = process.env.NEXT_PUBLIC_SERVER_PORT || '3002';
+      const hostname = location.hostname || 'localhost';
+      return `${protocol}//${hostname}:${port}/ws`;
+    }
+  } catch {
+    // 忽略错误（SSR 环境中 self/window 不可访问）
   }
-  // SSR 时使用默认值
+
+  // SSR 时返回占位符（实际不会被使用，因为 WebSocket 只在客户端创建）
   return 'ws://localhost:3002/ws';
 }
 
-const WS_URL = getWebSocketUrl();
+// 每次调用都重新计算，确保使用最新的 hostname
+const getWsUrl = () => getWebSocketUrl();
 
 // WebSocket manager state
 interface WSState {
@@ -407,7 +421,7 @@ function connect() {
   globalState.isConnecting = true;
 
   try {
-    const ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(getWsUrl());
     globalState.instance = ws;
 
     ws.onopen = () => {

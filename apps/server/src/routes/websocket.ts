@@ -119,13 +119,13 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
   }
 }
 
-async function handleCreateConversation(ws: WebSocket, payload: { id?: string; title?: string }) {
-  const conversationId = payload.id || `conv_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+async function handleCreateConversation(ws: WebSocket, payload?: { id?: string; title?: string }) {
+  const conversationId = payload?.id || `conv_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
   const now = new Date().toISOString();
 
   run(
     `INSERT INTO conversations (id, title, pinned, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
-    [conversationId, payload.title || null, now, now]
+    [conversationId, payload?.title || null, now, now]
   );
 
   const client = clients.get(ws);
@@ -135,7 +135,7 @@ async function handleCreateConversation(ws: WebSocket, payload: { id?: string; t
 
   send(ws, 'conversation.created', {
     id: conversationId,
-    title: payload.title || null,
+    title: payload?.title || null,
     pinned: false,
     createdAt: now,
     updatedAt: now,
@@ -190,13 +190,19 @@ async function handleSwitchConversation(ws: WebSocket, payload: { conversationId
   });
 }
 
-async function handleChatSend(ws: WebSocket, payload: {
+async function handleChatSend(ws: WebSocket, payload?: {
   conversationId: string;
   content: string;
   tempId?: string;
   virtualAgentId?: VirtualAgentId;
   expertId?: string;  // 新增
 }) {
+  if (!payload) {
+    console.error('[WS] handleChatSend: payload is undefined');
+    send(ws, 'error', { code: 'INVALID_PAYLOAD', message: 'Missing payload' });
+    return;
+  }
+
   const { conversationId, content, tempId, virtualAgentId, expertId } = payload;
 
   console.log(`[WS] handleChatSend: conversationId=${conversationId}, content=${content}, tempId=${tempId}, virtualAgentId=${virtualAgentId}`);

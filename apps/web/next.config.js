@@ -20,21 +20,22 @@ if (fs.existsSync(rootEnvPath)) {
     process.env.NEXT_PUBLIC_API_URL = `http://localhost:${port}/api/v1`;
   }
 
-  // 解析 NEXT_PUBLIC_WS_URL（优先使用 .env 中的配置）
+  // 注意：不设置 NEXT_PUBLIC_WS_URL 的默认值
+  // 让前端代码在运行时动态检测 hostname，避免硬编码 localhost
+  // 只有在 .env 中明确设置了 NEXT_PUBLIC_WS_URL 时才使用
   const wsUrlMatch = envContent.match(/^NEXT_PUBLIC_WS_URL=(.+)$/m);
   if (wsUrlMatch) {
     process.env.NEXT_PUBLIC_WS_URL = wsUrlMatch[1].trim();
-  } else {
-    process.env.NEXT_PUBLIC_WS_URL = `ws://localhost:${port}/ws`;
   }
+  // 不设置默认值，让 useWebSocket.ts 中的运行时检测生效
 }
 
 const nextConfig = {
   reactStrictMode: true,
   env: {
-    NEXT_PUBLIC_SERVER_PORT: process.env.NEXT_PUBLIC_SERVER_PORT || '3001',
-    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws',
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api/v1',
+    NEXT_PUBLIC_SERVER_PORT: process.env.NEXT_PUBLIC_SERVER_PORT || '3002',
+    // 不设置 NEXT_PUBLIC_WS_URL，让前端代码在运行时动态生成
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002/api/v1',
   },
   // 允许局域网 IP 访问开发服务器
   allowedDevOrigins: ['192.168.0.74'],

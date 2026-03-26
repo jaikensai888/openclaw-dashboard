@@ -267,7 +267,7 @@ export interface JsonRpcRequest {
  */
 export interface JsonRpcResponse<T = unknown> {
   jsonrpc: '2.0';
-  id: string | number;
+  id: string | number | null;
   result?: T;
   error?: {
     code: number;

@@ -7,10 +7,13 @@
 
 import { pino } from 'pino';
 import { loadConfig, validateConfig } from './config.js';
+import { createJsonRpcServer, type JsonRpcServer } from './server/jsonRpcServer.js';
 import type { ServerConfig, JsonRpcRequest, JsonRpcResponse, JsonRpcNotification } from './types/index.js';
 
 export * from './types/index.js';
 export { loadConfig, validateConfig } from './config.js';
+export { validateToken, extractTokenFromRequest, extractTokenFromUrl } from './utils/auth.js';
+export { createJsonRpcServer, JsonRpcError } from './server/jsonRpcServer.js';
 
 /**
  * Remote Server class
@@ -23,6 +26,7 @@ export class RemoteServer {
   private config: ServerConfig;
   private logger: pino.Logger;
   private running: boolean = false;
+  private jsonRpcServer: JsonRpcServer | null = null;
 
   /**
    * Create a new RemoteServer instance
@@ -86,7 +90,10 @@ export class RemoteServer {
       this.logger.info('Starting Dashboard Remote Server...');
       this.logger.info({ config: this.getSafeConfig() }, 'Configuration loaded');
 
-      // TODO: Initialize WebSocket server
+      // Initialize and start JSON-RPC server
+      this.jsonRpcServer = createJsonRpcServer(this.config, this.logger);
+      await this.jsonRpcServer.start();
+
       // TODO: Initialize file system manager
       // TODO: Initialize file watcher
       // TODO: Initialize Gateway bridge
@@ -112,12 +119,36 @@ export class RemoteServer {
 
     this.logger.info('Stopping Dashboard Remote Server...');
 
-    // TODO: Close WebSocket server
+    // Stop JSON-RPC server
+    if (this.jsonRpcServer) {
+      await this.jsonRpcServer.stop();
+      this.jsonRpcServer = null;
+    }
+
     // TODO: Stop file watchers
     // TODO: Close Gateway connection
 
     this.running = false;
     this.logger.info('Server stopped');
+  }
+
+  /**
+   * Broadcast a notification to all connected clients
+   *
+   * @param method - JSON-RPC method name
+   * @param params - Method parameters
+   */
+  broadcast(method: string, params: unknown): void {
+    if (this.jsonRpcServer) {
+      this.jsonRpcServer.broadcast(method, params);
+    }
+  }
+
+  /**
+   * Get the number of connected clients
+   */
+  getClientCount(): number {
+    return this.jsonRpcServer?.getClientCount() ?? 0;
   }
 
   /**

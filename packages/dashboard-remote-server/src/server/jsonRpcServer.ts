@@ -15,6 +15,17 @@ import type {
   JsonRpcNotification,
 } from '../types/index.js';
 import { validateToken, extractTokenFromUrl } from '../utils/auth.js';
+import {
+  FileSystemManager,
+  PathValidationError,
+  FileOperationError,
+  FileSizeExceededError,
+} from '../modules/fileSystemManager.js';
+import {
+  WatchManager,
+  WatchError,
+} from '../modules/watchManager.js';
+import type { WatchEvent } from '../types/index.js';
 
 // ============================================================
 // JSON-RPC Error Codes
@@ -89,6 +100,40 @@ export function createJsonRpcServer(
   const clients = new Map<WebSocket, ClientConnection>();
   const methods: MethodRegistry = {};
 
+  // Initialize FileSystemManager
+  const fileSystemManager = new FileSystemManager(config.filesystem, logger);
+
+  // Initialize WatchManager
+  const watchManager = new WatchManager(config.filesystem, logger);
+
+  // Set up watch event broadcasting
+  watchManager.setEventHandler((event: WatchEvent) => {
+    const notification = {
+      jsonrpc: '2.0' as const,
+      method: 'watch.event',
+      params: {
+        subscriptionId: event.subscriptionId,
+        type: event.type,
+        path: event.path,
+        timestamp: event.timestamp.toISOString(),
+      },
+    };
+
+    // Find clients that own this subscription and send to them
+    for (const client of clients.values()) {
+      if (client.subscriptions.has(event.subscriptionId)) {
+        if (client.ws.readyState === WebSocket.OPEN) {
+          client.ws.send(JSON.stringify(notification));
+        }
+      }
+    }
+
+    logger.debug(
+      { subscriptionId: event.subscriptionId, type: event.type, path: event.path },
+      'Watch event broadcast'
+    );
+  });
+
   // Generate unique client ID
   let clientIdCounter = 0;
   const generateClientId = (): string => {
@@ -96,10 +141,10 @@ export function createJsonRpcServer(
     return `client-${Date.now()}-${clientIdCounter}`;
   };
 
-  // Register stub methods for file system operations
-  registerFilesystemMethods(methods, logger);
-  // Register stub methods for watch operations
-  registerWatchMethods(methods, logger);
+  // Register file system methods
+  registerFilesystemMethods(methods, fileSystemManager, logger);
+  // Register watch methods
+  registerWatchMethods(methods, watchManager, logger);
   // Register stub methods for gateway operations
   registerGatewayMethods(methods, logger);
 
@@ -159,7 +204,12 @@ export function createJsonRpcServer(
     );
 
     // Clean up any subscriptions associated with this client
-    // (Will be implemented when WatchManager is ready)
+    watchManager.unsubscribeClient(client.id).catch((error) => {
+      logger.error(
+        { clientId: client.id, error: error instanceof Error ? error.message : String(error) },
+        'Error cleaning up client subscriptions'
+      );
+    });
   }
 
   /**
@@ -258,6 +308,40 @@ export function createJsonRpcServer(
           code: error.code,
           message: error.message,
           data: error.data,
+        });
+      }
+
+      // Handle file system errors
+      if (error instanceof PathValidationError) {
+        return createErrorResponse(id, {
+          code: -32001,
+          message: 'Path validation failed',
+          data: { reason: error.message },
+        });
+      }
+
+      if (error instanceof FileSizeExceededError) {
+        return createErrorResponse(id, {
+          code: -32002,
+          message: 'File size exceeded',
+          data: { reason: error.message },
+        });
+      }
+
+      if (error instanceof FileOperationError) {
+        return createErrorResponse(id, {
+          code: -32003,
+          message: 'File operation failed',
+          data: { reason: error.message },
+        });
+      }
+
+      // Handle watch errors
+      if (error instanceof WatchError) {
+        return createErrorResponse(id, {
+          code: -32004,
+          message: 'Watch operation failed',
+          data: { reason: error.message },
         });
       }
 
@@ -444,73 +528,146 @@ export class JsonRpcError extends Error {
 }
 
 // ============================================================
-// Stub Method Registrations
+// Method Registrations
 // ============================================================
 
 /**
- * Register file system method stubs
+ * Register file system methods
  */
-function registerFilesystemMethods(methods: MethodRegistry, logger: pino.Logger): void {
+function registerFilesystemMethods(
+  methods: MethodRegistry,
+  fsManager: FileSystemManager,
+  logger: pino.Logger
+): void {
   // File operations
   methods['file.read'] = async (params) => {
-    logger.debug({ params }, 'file.read called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path } = validateParams<{ path: string }>(params, ['path']);
+    logger.debug({ path }, 'file.read');
+    return fsManager.readFile(path);
   };
 
   methods['file.write'] = async (params) => {
-    logger.debug({ params }, 'file.write called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path, content, encoding } = validateParams<{
+      path: string;
+      content: string;
+      encoding?: string;
+    }>(params, ['path', 'content']);
+    logger.debug({ path, encoding }, 'file.write');
+    await fsManager.writeFile(path, content, encoding);
+    return { success: true };
   };
 
   methods['file.delete'] = async (params) => {
-    logger.debug({ params }, 'file.delete called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path } = validateParams<{ path: string }>(params, ['path']);
+    logger.debug({ path }, 'file.delete');
+    await fsManager.deleteFile(path);
+    return { success: true };
   };
 
   methods['file.exists'] = async (params) => {
-    logger.debug({ params }, 'file.exists called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path } = validateParams<{ path: string }>(params, ['path']);
+    logger.debug({ path }, 'file.exists');
+    const exists = await fsManager.exists(path);
+    return { exists };
   };
 
   methods['file.stat'] = async (params) => {
-    logger.debug({ params }, 'file.stat called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path } = validateParams<{ path: string }>(params, ['path']);
+    logger.debug({ path }, 'file.stat');
+    return fsManager.stat(path);
   };
 
   // Directory operations
   methods['directory.list'] = async (params) => {
-    logger.debug({ params }, 'directory.list called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path, recursive } = validateParams<{
+      path: string;
+      recursive?: boolean;
+    }>(params, ['path']);
+    logger.debug({ path, recursive }, 'directory.list');
+    return fsManager.listDirectory(path, recursive);
   };
 
   methods['directory.create'] = async (params) => {
-    logger.debug({ params }, 'directory.create called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path } = validateParams<{ path: string }>(params, ['path']);
+    logger.debug({ path }, 'directory.create');
+    await fsManager.createDirectory(path);
+    return { success: true };
   };
 
   methods['directory.delete'] = async (params) => {
-    logger.debug({ params }, 'directory.delete called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path, recursive } = validateParams<{
+      path: string;
+      recursive?: boolean;
+    }>(params, ['path']);
+    logger.debug({ path, recursive }, 'directory.delete');
+    await fsManager.deleteDirectory(path, recursive);
+    return { success: true };
   };
+}
+
+/**
+ * Validate that params object contains required fields
+ */
+function validateParams<T extends Record<string, unknown>>(
+  params: unknown,
+  required: string[]
+): T {
+  if (typeof params !== 'object' || params === null) {
+    throw new JsonRpcError(
+      JsonRpcErrors.INVALID_PARAMS.code,
+      'Params must be an object'
+    );
+  }
+
+  const obj = params as Record<string, unknown>;
+  const missing = required.filter((key) => !(key in obj) || obj[key] === undefined);
+
+  if (missing.length > 0) {
+    throw new JsonRpcError(
+      JsonRpcErrors.INVALID_PARAMS.code,
+      `Missing required parameters: ${missing.join(', ')}`
+    );
+  }
+
+  return obj as T;
 }
 
 /**
  * Register watch method stubs
  */
-function registerWatchMethods(methods: MethodRegistry, logger: pino.Logger): void {
+function registerWatchMethods(
+  methods: MethodRegistry,
+  watchManager: WatchManager,
+  logger: pino.Logger
+): void {
   methods['watch.subscribe'] = async (params, client) => {
-    logger.debug({ params, clientId: client.id }, 'watch.subscribe called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { path, recursive, includes, excludes, ignoreInitial } = validateParams<{
+      path: string;
+      recursive?: boolean;
+      includes?: string[];
+      excludes?: string[];
+      ignoreInitial?: boolean;
+    }>(params, ['path']);
+
+    logger.debug({ path, recursive, clientId: client.id }, 'watch.subscribe');
+
+    const options = { recursive, includes, excludes, ignoreInitial };
+    return watchManager.subscribe(path, options, client.id);
   };
 
   methods['watch.unsubscribe'] = async (params, client) => {
-    logger.debug({ params, clientId: client.id }, 'watch.unsubscribe called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+    const { subscriptionId } = validateParams<{ subscriptionId: string }>(params, ['subscriptionId']);
+
+    logger.debug({ subscriptionId, clientId: client.id }, 'watch.unsubscribe');
+
+    await watchManager.unsubscribe(subscriptionId, client.id);
+    return { success: true };
   };
 
-  methods['watch.list'] = async (params, client) => {
-    logger.debug({ params, clientId: client.id }, 'watch.list called (stub)');
-    throw new JsonRpcError(JsonRpcErrors.METHOD_NOT_FOUND.code, 'Not implemented yet');
+  methods['watch.list'] = async () => {
+    logger.debug('watch.list');
+    const subscriptions = await watchManager.list();
+    return { subscriptions };
   };
 }
 

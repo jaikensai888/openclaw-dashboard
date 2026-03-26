@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { useFileStore } from '@/stores/fileStore';
 import type { Message, Task, TaskOutput } from '@openclaw-dashboard/shared';
 
 // 动态生成 WebSocket URL，使用当前页面的 hostname
@@ -399,6 +400,86 @@ function handleMessage(type: string, payload: unknown) {
       }
       break;
 
+    // Remote file operation handlers
+    case 'directory:list:result':
+      {
+        const { success, data, error } = payload as {
+          success: boolean;
+          data?: Array<{
+            name: string;
+            path: string;
+            isDirectory: boolean;
+            size: number;
+            mtime: number;
+          }>;
+          error?: string;
+        };
+        if (success && data) {
+          useFileStore.getState().setFiles(data);
+        } else {
+          useFileStore.getState().setError(error || 'Unknown error');
+        }
+      }
+      break;
+
+    case 'file:read:result':
+      {
+        const { success, data, error } = payload as {
+          success: boolean;
+          data?: { content: string; encoding?: string };
+          error?: string;
+        };
+        if (success && data) {
+          useFileStore.getState().setFileContent(data.content);
+        } else {
+          useFileStore.getState().setError(error || 'Unknown error');
+        }
+      }
+      break;
+
+    case 'watch:event':
+      {
+        const watchPayload = payload as {
+          subscriptionId: string;
+          path: string;
+          type: 'created' | 'changed' | 'deleted';
+        };
+        console.log('[WS] Watch event:', watchPayload);
+        // Refresh file list if the event is in current directory
+        // This can be enhanced based on needs
+      }
+      break;
+
+    case 'remote:servers:result':
+      {
+        const { success, data } = payload as {
+          success: boolean;
+          data?: Array<{
+            serverId: string;
+            tunnelStatus: { status: string };
+            rpcConnected: boolean;
+            gatewayConnected: boolean;
+          }>;
+        };
+        if (success && data) {
+          console.log('[WS] Remote servers status:', data);
+          // Update remote store if needed
+        }
+      }
+      break;
+
+    case 'remote:switch:result':
+      {
+        const { success, activeServerId } = payload as {
+          success: boolean;
+          activeServerId: string | null;
+        };
+        if (success) {
+          console.log('[WS] Switched to server:', activeServerId);
+        }
+      }
+      break;
+
     default:
       console.warn('[WS] Unknown message type:', type);
   }
@@ -645,6 +726,31 @@ export function useWebSocket() {
     []
   );
 
+  // Remote file operation methods
+  const listRemoteDirectory = useCallback((path: string) => {
+    send('directory:list', { path });
+  }, []);
+
+  const readRemoteFile = useCallback((path: string) => {
+    send('file:read', { path });
+  }, []);
+
+  const subscribeWatch = useCallback((path: string) => {
+    send('watch:subscribe', { path });
+  }, []);
+
+  const unsubscribeWatch = useCallback((subscriptionId: string) => {
+    send('watch:unsubscribe', { subscriptionId });
+  }, []);
+
+  const switchRemoteServer = useCallback((serverId: string | null) => {
+    send('remote:switch', { serverId });
+  }, []);
+
+  const listRemoteServers = useCallback(() => {
+    send('remote:servers', {});
+  }, []);
+
   return {
     sendMessage,
     sendMessageWithAgent,
@@ -658,5 +764,11 @@ export function useWebSocket() {
     deleteConversation,
     isConnected: globalState.instance?.readyState === WebSocket.OPEN,
     waitForConnection,
+    listRemoteDirectory,
+    readRemoteFile,
+    subscribeWatch,
+    unsubscribeWatch,
+    switchRemoteServer,
+    listRemoteServers,
   };
 }

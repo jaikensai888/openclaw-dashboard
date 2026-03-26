@@ -14,7 +14,6 @@ function getWebSocketUrl(): string {
   // 直接使用 self 或 window，避免 webpack 静态分析问题
   // self 在浏览器和 Web Worker 中都可用
   try {
-    // @ts-expect-error - 动态访问
     const location = self?.location || window?.location;
     if (location) {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';

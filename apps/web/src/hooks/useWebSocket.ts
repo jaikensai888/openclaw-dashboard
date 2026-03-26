@@ -526,6 +526,9 @@ function send(type: string, payload: unknown) {
   }
 }
 
+// Export send for use outside of React components
+export { send };
+
 export function useWebSocket() {
   const mountedRef = useRef(false);
 

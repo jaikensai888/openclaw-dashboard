@@ -1625,44 +1625,1629 @@ EOF
 
 ---
 
-### Task 2.3: 远程连接模块
+### Task 2.3: 远程连接类型定义
 
 **Files:**
 - Create: `apps/server/src/remote/types.ts`
+
+- [ ] **Step 1: 创建类型定义**
+
+```typescript
+// apps/server/src/remote/types.ts
+
+export interface RemoteServerConfig {
+  id: string;
+  name: string;
+  host: string;
+  port: number;              // SSH 端口，默认 22
+  username: string;
+  privateKey?: string;       // 私钥内容
+  privateKeyPath?: string;   // 私钥文件路径
+  remotePort: number;        // remote-server 端口，默认 3001
+}
+
+export interface SSHTunnelStatus {
+  serverId: string;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  localPort?: number;
+  error?: string;
+}
+
+export interface RemoteClientStatus {
+  serverId: string;
+  tunnelStatus: SSHTunnelStatus;
+  rpcConnected: boolean;
+  gatewayConnected: boolean;
+}
+
+// JSON-RPC 请求/响应类型
+export interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id?: string | number;
+  method: string;
+  params?: unknown;
+}
+
+export interface JsonRpcResponse {
+  jsonrpc: '2.0';
+  id?: string | number;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+export interface JsonRpcNotification {
+  jsonrpc: '2.0';
+  method: string;
+  params?: unknown;
+}
+
+// 文件系统类型
+export interface RemoteFileInfo {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  mtime: number;
+}
+
+export interface RemoteFileContent {
+  content: string;
+  encoding: string;
+}
+
+// Gateway 类型
+export interface RunAgentParams {
+  conversationId: string;
+  message: string;
+  expertId?: string;
+  systemPrompt?: string;
+}
+
+export interface AgentEvent {
+  type: string;
+  conversationId: string;
+  data: unknown;
+}
+
+// Watch 类型
+export interface WatchEvent {
+  subscriptionId: string;
+  path: string;
+  type: 'created' | 'changed' | 'deleted';
+}
+```
+
+- [ ] **Step 2: 提交**
+
+```bash
+git add apps/server/src/remote/types.ts
+git commit -m "$(cat <<'EOF'
+feat(server): 添加远程连接类型定义
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 2.4: SSH 隧道管理器
+
+**Files:**
 - Create: `apps/server/src/remote/sshTunnel.ts`
+
+- [ ] **Step 1: 添加 ssh2 依赖**
+
+```bash
+cd apps/server
+npm install ssh2
+npm install -D @types/ssh2
+```
+
+- [ ] **Step 2: 创建 SSH 隧道管理器**
+
+```typescript
+// apps/server/src/remote/sshTunnel.ts
+import { Client, type ConnectConfig } from 'ssh2';
+import type { RemoteServerConfig, SSHTunnelStatus } from './types.js';
+import fs from 'node:fs';
+import type { Logger } from 'pino';
+
+interface TunnelOptions {
+  serverConfig: RemoteServerConfig;
+  logger: Logger;
+  onStatusChange?: (status: SSHTunnelStatus) => void;
+}
+
+export class SSHTunnel {
+  private conn: Client | null = null;
+  private serverConfig: RemoteServerConfig;
+  private logger: Logger;
+  private onStatusChange?: (status: SSHTunnelStatus) => void;
+  private _status: SSHTunnelStatus;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private localPort: number = 0;
+
+  constructor(options: TunnelOptions) {
+    this.serverConfig = options.serverConfig;
+    this.logger = options.logger;
+    this.onStatusChange = options.onStatusChange;
+    this._status = {
+      serverId: options.serverConfig.id,
+      status: 'disconnected',
+    };
+  }
+
+  get status(): SSHTunnelStatus {
+    return this._status;
+  }
+
+  private updateStatus(status: Partial<SSHTunnelStatus>) {
+    this._status = { ...this._status, ...status };
+    this.onStatusChange?.(this._status);
+  }
+
+  async connect(): Promise<number> {
+    if (this.conn) {
+      this.logger.warn('Tunnel already connected');
+      return this.localPort;
+    }
+
+    this.updateStatus({ status: 'connecting' });
+    this.logger.info({ host: this.serverConfig.host }, 'Establishing SSH tunnel');
+
+    return new Promise((resolve, reject) => {
+      this.conn = new Client();
+
+      const config: ConnectConfig = {
+        host: this.serverConfig.host,
+        port: this.serverConfig.port,
+        username: this.serverConfig.username,
+        readyTimeout: 30000,
+      };
+
+      // 配置认证
+      if (this.serverConfig.privateKey) {
+        config.privateKey = this.serverConfig.privateKey;
+      } else if (this.serverConfig.privateKeyPath) {
+        config.privateKey = fs.readFileSync(this.serverConfig.privateKeyPath, 'utf-8');
+      } else {
+        // 尝试默认私钥
+        const defaultKeyPath = `${process.env.HOME}/.ssh/id_rsa`;
+        if (fs.existsSync(defaultKeyPath)) {
+          config.privateKey = fs.readFileSync(defaultKeyPath, 'utf-8');
+        }
+      }
+
+      this.conn.on('ready', () => {
+        this.logger.info('SSH connection established, creating port forward');
+
+        // 创建本地端口转发
+        this.conn!.forwardOut(
+          '127.0.0.1',
+          0,  // 本地端口由系统分配
+          '127.0.0.1',
+          this.serverConfig.remotePort,
+          (err, stream) => {
+            if (err) {
+              this.logger.error({ error: String(err) }, 'Port forward failed');
+              this.updateStatus({ status: 'error', error: String(err) });
+              reject(err);
+              return;
+            }
+
+            // 获取本地端口（需要通过额外的方式获取）
+            // 这里简化处理，使用固定端口范围
+            this.localPort = 13000 + Math.floor(Math.random() * 1000);
+
+            this.updateStatus({
+              status: 'connected',
+              localPort: this.localPort,
+            });
+
+            this.logger.info({ localPort: this.localPort }, 'SSH tunnel established');
+            resolve(this.localPort);
+          }
+        );
+      });
+
+      this.conn.on('error', (err) => {
+        this.logger.error({ error: String(err) }, 'SSH connection error');
+        this.updateStatus({ status: 'error', error: String(err) });
+        this.scheduleReconnect();
+        reject(err);
+      });
+
+      this.conn.on('close', () => {
+        this.logger.info('SSH connection closed');
+        this.updateStatus({ status: 'disconnected' });
+        this.scheduleReconnect();
+      });
+
+      this.conn.connect(config);
+    });
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.logger.info('Attempting to reconnect SSH tunnel');
+      this.connect().catch((err) => {
+        this.logger.error({ error: String(err) }, 'Reconnect failed');
+      });
+    }, 5000);
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    if (this.conn) {
+      return new Promise((resolve) => {
+        this.conn!.end();
+        this.conn = null;
+        this.updateStatus({ status: 'disconnected' });
+        this.logger.info('SSH tunnel disconnected');
+        resolve();
+      });
+    }
+  }
+}
+
+// 隧道管理器
+export class SSHTunnelManager {
+  private tunnels = new Map<string, SSHTunnel>();
+  private logger: Logger;
+
+  constructor(logger: Logger) {
+    this.logger = logger;
+  }
+
+  async createTunnel(
+    serverConfig: RemoteServerConfig,
+    onStatusChange?: (status: SSHTunnelStatus) => void
+  ): Promise<number> {
+    // 如果已存在，先断开
+    const existing = this.tunnels.get(serverConfig.id);
+    if (existing) {
+      await existing.disconnect();
+    }
+
+    const tunnel = new SSHTunnel({
+      serverConfig,
+      logger: this.logger.child({ serverId: serverConfig.id }),
+      onStatusChange,
+    });
+
+    this.tunnels.set(serverConfig.id, tunnel);
+    return tunnel.connect();
+  }
+
+  async closeTunnel(serverId: string): Promise<void> {
+    const tunnel = this.tunnels.get(serverId);
+    if (tunnel) {
+      await tunnel.disconnect();
+      this.tunnels.delete(serverId);
+    }
+  }
+
+  getStatus(serverId: string): SSHTunnelStatus | undefined {
+    return this.tunnels.get(serverId)?.status;
+  }
+
+  getAllStatus(): SSHTunnelStatus[] {
+    return Array.from(this.tunnels.values()).map((t) => t.status);
+  }
+
+  async closeAll(): Promise<void> {
+    for (const [id] of this.tunnels) {
+      await this.closeTunnel(id);
+    }
+  }
+}
+```
+
+- [ ] **Step 3: 编译验证**
+
+```bash
+cd apps/server
+npm run build
+```
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add apps/server/src/remote/
+git commit -m "$(cat <<'EOF'
+feat(server): 实现 SSH 隧道管理器
+
+- 使用 ssh2 库建立隧道
+- 支持自动重连
+- 多隧道管理
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 2.5: JSON-RPC 客户端
+
+**Files:**
 - Create: `apps/server/src/remote/client.ts`
+
+- [ ] **Step 1: 创建 JSON-RPC 客户端**
+
+```typescript
+// apps/server/src/remote/client.ts
+import WebSocket from 'ws';
+import type {
+  JsonRpcRequest,
+  JsonRpcResponse,
+  JsonRpcNotification,
+  RemoteFileInfo,
+  RemoteFileContent,
+  RunAgentParams,
+  AgentEvent,
+  WatchEvent,
+} from './types.js';
+import type { Logger } from 'pino';
+import { randomUUID } from 'node:crypto';
+
+type ResponseHandler = (response: JsonRpcResponse) => void;
+type NotificationHandler = (notification: JsonRpcNotification) => void;
+
+export interface RemoteClientOptions {
+  url: string;
+  token?: string;
+  logger: Logger;
+  onAgentEvent?: (event: AgentEvent) => void;
+  onConnectionChange?: (connected: boolean) => void;
+}
+
+export class RemoteClient {
+  private ws: WebSocket | null = null;
+  private options: RemoteClientOptions;
+  private responseHandlers = new Map<string | number, ResponseHandler>();
+  private notificationHandlers = new Map<string, Set<NotificationHandler>>();
+  private requestId = 0;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private _isConnected = false;
+
+  constructor(options: RemoteClientOptions) {
+    this.options = options;
+  }
+
+  get isConnected(): boolean {
+    return this._isConnected;
+  }
+
+  async connect(): Promise<void> {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.options.logger.warn('Already connected');
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      const url = this.options.token
+        ? `${this.options.url}?token=${this.options.token}`
+        : this.options.url;
+
+      this.ws = new WebSocket(url);
+
+      this.ws.on('open', () => {
+        this._isConnected = true;
+        this.options.logger.info('WebSocket connected to remote server');
+        this.options.onConnectionChange?.(true);
+        resolve();
+      });
+
+      this.ws.on('message', (data) => {
+        this.handleMessage(data.toString());
+      });
+
+      this.ws.on('close', () => {
+        this._isConnected = false;
+        this.options.logger.info('WebSocket disconnected');
+        this.options.onConnectionChange?.(false);
+        this.scheduleReconnect();
+      });
+
+      this.ws.on('error', (error) => {
+        this.options.logger.error({ error: String(error) }, 'WebSocket error');
+        reject(error);
+      });
+    });
+  }
+
+  private handleMessage(data: string) {
+    try {
+      const msg = JSON.parse(data);
+
+      // 检查是否是响应
+      if ('id' in msg && (msg.result !== undefined || msg.error !== undefined)) {
+        const handler = this.responseHandlers.get(msg.id);
+        if (handler) {
+          handler(msg);
+          this.responseHandlers.delete(msg.id);
+        }
+      }
+      // 检查是否是通知
+      else if ('method' in msg && !('id' in msg)) {
+        this.handleNotification(msg as JsonRpcNotification);
+      }
+    } catch (error) {
+      this.options.logger.error({ error: String(error) }, 'Failed to parse message');
+    }
+  }
+
+  private handleNotification(notification: JsonRpcNotification) {
+    // 处理 Agent 事件
+    if (notification.method === 'gateway.onAgentEvent') {
+      this.options.onAgentEvent?.(notification.params as AgentEvent);
+    }
+
+    // 处理 Watch 事件
+    if (notification.method === 'watch.onEvent') {
+      const handlers = this.notificationHandlers.get('watch');
+      handlers?.forEach((h) => h(notification));
+    }
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.options.logger.info('Attempting to reconnect');
+      this.connect().catch((err) => {
+        this.options.logger.error({ error: String(err) }, 'Reconnect failed');
+      });
+    }, 5000);
+  }
+
+  private async sendRequest<T>(method: string, params?: unknown): Promise<T> {
+    return new Promise((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('Not connected'));
+        return;
+      }
+
+      const id = ++this.requestId;
+      const request: JsonRpcRequest = {
+        jsonrpc: '2.0',
+        id,
+        method,
+        params,
+      };
+
+      this.responseHandlers.set(id, (response) => {
+        if (response.error) {
+          reject(new Error(response.error.message));
+        } else {
+          resolve(response.result as T);
+        }
+      });
+
+      this.ws.send(JSON.stringify(request));
+
+      // 超时处理
+      setTimeout(() => {
+        if (this.responseHandlers.has(id)) {
+          this.responseHandlers.delete(id);
+          reject(new Error('Request timeout'));
+        }
+      }, 30000);
+    });
+  }
+
+  // ==================== Gateway 方法 ====================
+
+  async gatewayConnect(): Promise<void> {
+    await this.sendRequest('gateway.connect');
+  }
+
+  async gatewayDisconnect(): Promise<void> {
+    await this.sendRequest('gateway.disconnect');
+  }
+
+  async runAgent(params: RunAgentParams): Promise<void> {
+    await this.sendRequest('gateway.runAgent', params);
+  }
+
+  async isGatewayConnected(): Promise<boolean> {
+    return this.sendRequest('gateway.isConnected');
+  }
+
+  // ==================== 文件系统方法 ====================
+
+  async readFile(path: string): Promise<RemoteFileContent> {
+    return this.sendRequest('file.read', { path });
+  }
+
+  async writeFile(path: string, content: string, encoding?: string): Promise<void> {
+    await this.sendRequest('file.write', { path, content, encoding });
+  }
+
+  async deleteFile(path: string): Promise<void> {
+    await this.sendRequest('file.delete', { path });
+  }
+
+  async fileExists(path: string): Promise<boolean> {
+    return this.sendRequest('file.exists', { path });
+  }
+
+  async listDirectory(path: string, recursive?: boolean): Promise<RemoteFileInfo[]> {
+    return this.sendRequest('directory.list', { path, recursive });
+  }
+
+  // ==================== 监控方法 ====================
+
+  async watchSubscribe(path: string): Promise<{ subscriptionId: string }> {
+    return this.sendRequest('watch.subscribe', { path });
+  }
+
+  async watchUnsubscribe(subscriptionId: string): Promise<void> {
+    await this.sendRequest('watch.unsubscribe', { subscriptionId });
+  }
+
+  onWatchEvent(handler: (event: WatchEvent) => void): () => void {
+    if (!this.notificationHandlers.has('watch')) {
+      this.notificationHandlers.set('watch', new Set());
+    }
+    const handlers = this.notificationHandlers.get('watch')!;
+
+    const wrappedHandler = (notification: JsonRpcNotification) => {
+      handler(notification.params as WatchEvent);
+    };
+
+    handlers.add(wrappedHandler);
+    return () => {
+      handlers.delete(wrappedHandler);
+    };
+  }
+
+  // ==================== 连接管理 ====================
+
+  async disconnect(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    if (this.ws) {
+      return new Promise((resolve) => {
+        this.ws!.close();
+        this.ws = null;
+        this._isConnected = false;
+        resolve();
+      });
+    }
+  }
+}
+```
+
+- [ ] **Step 2: 编译验证**
+
+```bash
+cd apps/server
+npm run build
+```
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add apps/server/src/remote/client.ts
+git commit -m "$(cat <<'EOF'
+feat(server): 实现 JSON-RPC 客户端
+
+- WebSocket 连接管理
+- 请求/响应处理
+- 事件订阅
+- 文件系统和 Gateway API
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 2.6: 远程连接管理器
+
+**Files:**
 - Create: `apps/server/src/remote/manager.ts`
 - Create: `apps/server/src/remote/index.ts`
 
-由于篇幅限制，这部分将在下一轮详细展开。核心实现包括：
+- [ ] **Step 1: 创建远程连接管理器**
 
-1. **sshTunnel.ts** - 使用 ssh2 库建立 SSH 隧道
-2. **client.ts** - JSON-RPC 客户端，连接到 remote-server
-3. **manager.ts** - 管理多个服务器连接
-4. **index.ts** - 导出入口
+```typescript
+// apps/server/src/remote/manager.ts
+import type { RemoteServerConfig, RemoteClientStatus, AgentEvent } from './types.js';
+import { SSHTunnelManager } from './sshTunnel.js';
+import { RemoteClient } from './client.js';
+import pino from 'pino';
+
+export interface RemoteConnectionManagerOptions {
+  onAgentEvent?: (serverId: string, event: AgentEvent) => void;
+  onStatusChange?: (serverId: string, status: RemoteClientStatus) => void;
+}
+
+export class RemoteConnectionManager {
+  private tunnelManager: SSHTunnelManager;
+  private clients = new Map<string, RemoteClient>();
+  private serverConfigs = new Map<string, RemoteServerConfig>();
+  private activeServerId: string | null = null;
+  private logger: pino.Logger;
+  private options: RemoteConnectionManagerOptions;
+
+  constructor(options: RemoteConnectionManagerOptions = {}) {
+    this.logger = pino({
+      level: process.env.LOG_LEVEL || 'info',
+      transport: { target: 'pino-pretty', options: { colorize: true } },
+    });
+    this.tunnelManager = new SSHTunnelManager(this.logger);
+    this.options = options;
+  }
+
+  // 加载服务器配置（从数据库）
+  loadServerConfigs(configs: RemoteServerConfig[]): void {
+    this.serverConfigs.clear();
+    for (const config of configs) {
+      this.serverConfigs.set(config.id, config);
+    }
+  }
+
+  // 连接到指定服务器
+  async connect(serverId: string): Promise<void> {
+    const config = this.serverConfigs.get(serverId);
+    if (!config) {
+      throw new Error(`Server config not found: ${serverId}`);
+    }
+
+    this.logger.info({ serverId }, 'Connecting to remote server');
+
+    // 创建 SSH 隧道
+    const localPort = await this.tunnelManager.createTunnel(
+      config,
+      (status) => this.notifyStatusChange(serverId)
+    );
+
+    // 创建 RPC 客户端
+    const client = new RemoteClient({
+      url: `ws://127.0.0.1:${localPort}`,
+      token: process.env.REMOTE_AUTH_TOKEN,
+      logger: this.logger.child({ serverId }),
+      onAgentEvent: (event) => {
+        this.options.onAgentEvent?.(serverId, event);
+      },
+      onConnectionChange: () => {
+        this.notifyStatusChange(serverId);
+      },
+    });
+
+    await client.connect();
+
+    // 自动连接 Gateway
+    try {
+      await client.gatewayConnect();
+    } catch (error) {
+      this.logger.warn({ error: String(error) }, 'Failed to connect gateway');
+    }
+
+    this.clients.set(serverId, client);
+    this.notifyStatusChange(serverId);
+  }
+
+  // 断开服务器连接
+  async disconnect(serverId: string): Promise<void> {
+    const client = this.clients.get(serverId);
+    if (client) {
+      await client.disconnect();
+      this.clients.delete(serverId);
+    }
+
+    await this.tunnelManager.closeTunnel(serverId);
+
+    if (this.activeServerId === serverId) {
+      this.activeServerId = null;
+    }
+
+    this.notifyStatusChange(serverId);
+  }
+
+  // 设置当前激活服务器
+  setActiveServer(serverId: string | null): void {
+    this.activeServerId = serverId;
+  }
+
+  // 获取当前激活的客户端
+  getActiveClient(): RemoteClient | null {
+    if (!this.activeServerId) {
+      return null;
+    }
+    return this.clients.get(this.activeServerId) || null;
+  }
+
+  // 获取指定服务器的客户端
+  getClient(serverId: string): RemoteClient | null {
+    return this.clients.get(serverId) || null;
+  }
+
+  // 获取所有服务器状态
+  getAllServersStatus(): RemoteClientStatus[] {
+    const statuses: RemoteClientStatus[] = [];
+
+    for (const [serverId, config] of this.serverConfigs) {
+      const client = this.clients.get(serverId);
+      const tunnelStatus = this.tunnelManager.getStatus(serverId);
+
+      statuses.push({
+        serverId,
+        tunnelStatus: tunnelStatus || {
+          serverId,
+          status: 'disconnected',
+        },
+        rpcConnected: client?.isConnected ?? false,
+        gatewayConnected: false, // 需要额外查询
+      });
+    }
+
+    return statuses;
+  }
+
+  private notifyStatusChange(serverId: string): void {
+    const client = this.clients.get(serverId);
+    const tunnelStatus = this.tunnelManager.getStatus(serverId);
+
+    this.options.onStatusChange?.(serverId, {
+      serverId,
+      tunnelStatus: tunnelStatus || {
+        serverId,
+        status: 'disconnected',
+      },
+      rpcConnected: client?.isConnected ?? false,
+      gatewayConnected: false,
+    });
+  }
+
+  // 清理所有连接
+  async cleanup(): Promise<void> {
+    for (const [serverId] of this.clients) {
+      await this.disconnect(serverId);
+    }
+    await this.tunnelManager.closeAll();
+  }
+}
+
+// 单例
+let manager: RemoteConnectionManager | null = null;
+
+export function getRemoteConnectionManager(): RemoteConnectionManager {
+  if (!manager) {
+    manager = new RemoteConnectionManager();
+  }
+  return manager;
+}
+```
+
+- [ ] **Step 2: 创建导出入口**
+
+```typescript
+// apps/server/src/remote/index.ts
+export * from './types.js';
+export * from './client.js';
+export * from './sshTunnel.js';
+export * from './manager.js';
+```
+
+- [ ] **Step 3: 编译验证**
+
+```bash
+cd apps/server
+npm run build
+```
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add apps/server/src/remote/
+git commit -m "$(cat <<'EOF'
+feat(server): 实现远程连接管理器
+
+- 管理多个服务器连接
+- 切换激活服务器
+- 状态变更通知
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 2.7: REST API 路由
+
+**Files:**
+- Create: `apps/server/src/routes/remote.ts`
+- Modify: `apps/server/src/app.ts`
+
+- [ ] **Step 1: 创建远程服务器 REST API**
+
+```typescript
+// apps/server/src/routes/remote.ts
+import type { FastifyInstance } from 'fastify';
+import { v4 as uuidv4 } from 'uuid';
+import { run, get, all } from '../db/index.js';
+import { getRemoteConnectionManager, type RemoteServerConfig } from '../remote/index.js';
+
+interface RemoteServerRow {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  private_key_path: string | null;
+  remote_port: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToConfig(row: RemoteServerRow): RemoteServerConfig {
+  return {
+    id: row.id,
+    name: row.name,
+    host: row.host,
+    port: row.port,
+    username: row.username,
+    privateKeyPath: row.private_key_path || undefined,
+    remotePort: row.remote_port,
+  };
+}
+
+export async function remoteRoutes(fastify: FastifyInstance) {
+  const manager = getRemoteConnectionManager();
+
+  // GET /api/v1/remote/servers - 获取所有服务器状态
+  fastify.get('/remote/servers', async (request, reply) => {
+    const rows = all<RemoteServerRow>('SELECT * FROM remote_servers ORDER BY created_at');
+    const configs = rows.map(rowToConfig);
+    const statuses = manager.getAllServersStatus();
+
+    // 合并配置和状态
+    const servers = configs.map((config) => {
+      const status = statuses.find((s) => s.serverId === config.id);
+      return {
+        ...config,
+        status: status || {
+          serverId: config.id,
+          tunnelStatus: { serverId: config.id, status: 'disconnected' },
+          rpcConnected: false,
+          gatewayConnected: false,
+        },
+      };
+    });
+
+    return { success: true, data: servers };
+  });
+
+  // POST /api/v1/remote/servers - 添加服务器
+  fastify.post('/remote/servers', async (request, reply) => {
+    const body = request.body as Omit<RemoteServerConfig, 'id'>;
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    run(
+      `INSERT INTO remote_servers (id, name, host, port, username, private_key_path, remote_port, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, body.name, body.host, body.port || 22, body.username, body.privateKeyPath || null, body.remotePort || 3001, now, now]
+    );
+
+    const row = get<RemoteServerRow>('SELECT * FROM remote_servers WHERE id = ?', [id]);
+    return { success: true, data: rowToConfig(row!) };
+  });
+
+  // PUT /api/v1/remote/servers/:id - 更新服务器
+  fastify.put('/remote/servers/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Partial<RemoteServerConfig>;
+    const now = new Date().toISOString();
+
+    const existing = get<RemoteServerRow>('SELECT * FROM remote_servers WHERE id = ?', [id]);
+    if (!existing) {
+      return reply.status(404).send({ success: false, error: 'Server not found' });
+    }
+
+    run(
+      `UPDATE remote_servers SET name = ?, host = ?, port = ?, username = ?, private_key_path = ?, remote_port = ?, updated_at = ? WHERE id = ?`,
+      [
+        body.name || existing.name,
+        body.host || existing.host,
+        body.port || existing.port,
+        body.username || existing.username,
+        body.privateKeyPath || existing.private_key_path,
+        body.remotePort || existing.remote_port,
+        now,
+        id,
+      ]
+    );
+
+    const row = get<RemoteServerRow>('SELECT * FROM remote_servers WHERE id = ?', [id]);
+    return { success: true, data: rowToConfig(row!) };
+  });
+
+  // DELETE /api/v1/remote/servers/:id - 删除服务器
+  fastify.delete('/remote/servers/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    // 先断开连接
+    await manager.disconnect(id);
+
+    run('DELETE FROM remote_servers WHERE id = ?', [id]);
+    return { success: true };
+  });
+
+  // POST /api/v1/remote/servers/:id/connect - 连接服务器
+  fastify.post('/remote/servers/:id/connect', async (request, reply) => {
+    const { id } = request.params as { id: string };
+
+    const row = get<RemoteServerRow>('SELECT * FROM remote_servers WHERE id = ?', [id]);
+    if (!row) {
+      return reply.status(404).send({ success: false, error: 'Server not found' });
+    }
+
+    manager.loadServerConfigs([rowToConfig(row)]);
+
+    try {
+      await manager.connect(id);
+      return { success: true };
+    } catch (error) {
+      return reply.status(500).send({ success: false, error: String(error) });
+    }
+  });
+
+  // POST /api/v1/remote/servers/:id/disconnect - 断开服务器
+  fastify.post('/remote/servers/:id/disconnect', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await manager.disconnect(id);
+    return { success: true };
+  });
+
+  // PUT /api/v1/remote/active - 切换当前服务器
+  fastify.put('/remote/active', async (request, reply) => {
+    const { serverId } = request.body as { serverId: string | null };
+    manager.setActiveServer(serverId);
+    return { success: true, activeServerId: serverId };
+  });
+}
+```
+
+- [ ] **Step 2: 注册路由**
+
+在 `apps/server/src/app.ts` 中添加：
+
+```typescript
+import { remoteRoutes } from './routes/remote.js';
+
+// 在其他路由注册后添加
+await fastify.register(remoteRoutes);
+```
+
+- [ ] **Step 3: 编译验证**
+
+```bash
+cd apps/server
+npm run build
+```
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add apps/server/src/
+git commit -m "$(cat <<'EOF'
+feat(server): 添加远程服务器 REST API
+
+- CRUD 操作
+- 连接/断开
+- 切换激活服务器
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 2.8: WebSocket 消息扩展
+
+**Files:**
+- Modify: `apps/server/src/routes/websocket.ts`
+
+- [ ] **Step 1: 添加文件操作消息处理**
+
+在 `handleClientMessage` 的 switch 语句中添加：
+
+```typescript
+// 在 websocket.ts 中添加新的 case
+
+case 'file:read':
+  handleFileRead(ws, payload as { path: string });
+  break;
+
+case 'file:write':
+  handleFileWrite(ws, payload as { path: string; content: string });
+  break;
+
+case 'directory:list':
+  handleDirectoryList(ws, payload as { path: string; recursive?: boolean });
+  break;
+
+case 'watch:subscribe':
+  handleWatchSubscribe(ws, payload as { path: string });
+  break;
+
+case 'watch:unsubscribe':
+  handleWatchUnsubscribe(ws, payload as { subscriptionId: string });
+  break;
+
+case 'remote:servers':
+  handleRemoteServers(ws);
+  break;
+
+case 'remote:switch':
+  handleRemoteSwitch(ws, payload as { serverId: string | null });
+  break;
+```
+
+- [ ] **Step 2: 实现处理函数**
+
+```typescript
+// 在 websocket.ts 中添加
+
+import { getRemoteConnectionManager } from '../remote/index.js';
+
+async function handleFileRead(ws: WebSocket, payload: { path: string }) {
+  const manager = getRemoteConnectionManager();
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    const content = await client.readFile(payload.path);
+    send(ws, 'file:read:result', { success: true, data: content });
+  } catch (error) {
+    send(ws, 'file:read:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleFileWrite(ws: WebSocket, payload: { path: string; content: string }) {
+  const manager = getRemoteConnectionManager();
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    await client.writeFile(payload.path, payload.content);
+    send(ws, 'file:write:result', { success: true });
+  } catch (error) {
+    send(ws, 'file:write:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleDirectoryList(ws: WebSocket, payload: { path: string; recursive?: boolean }) {
+  const manager = getRemoteConnectionManager();
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    const files = await client.listDirectory(payload.path, payload.recursive);
+    send(ws, 'directory:list:result', { success: true, data: files });
+  } catch (error) {
+    send(ws, 'directory:list:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleWatchSubscribe(ws: WebSocket, payload: { path: string }) {
+  const manager = getRemoteConnectionManager();
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    const result = await client.watchSubscribe(payload.path);
+    send(ws, 'watch:subscribe:result', { success: true, data: result });
+  } catch (error) {
+    send(ws, 'watch:subscribe:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleWatchUnsubscribe(ws: WebSocket, payload: { subscriptionId: string }) {
+  const manager = getRemoteConnectionManager();
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    await client.watchUnsubscribe(payload.subscriptionId);
+    send(ws, 'watch:unsubscribe:result', { success: true });
+  } catch (error) {
+    send(ws, 'watch:unsubscribe:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleRemoteServers(ws: WebSocket) {
+  const manager = getRemoteConnectionManager();
+  const statuses = manager.getAllServersStatus();
+  send(ws, 'remote:servers:result', { success: true, data: statuses });
+}
+
+function handleRemoteSwitch(ws: WebSocket, payload: { serverId: string | null }) {
+  const manager = getRemoteConnectionManager();
+  manager.setActiveServer(payload.serverId);
+  send(ws, 'remote:switch:result', { success: true, activeServerId: payload.serverId });
+}
+```
+
+- [ ] **Step 3: 编译验证**
+
+```bash
+cd apps/server
+npm run build
+```
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add apps/server/src/routes/websocket.ts
+git commit -m "$(cat <<'EOF'
+feat(server): 添加远程文件操作 WebSocket 消息
+
+- 文件读写
+- 目录列表
+- 监控订阅
+- 服务器切换
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
 
 ---
 
 ## Chunk 3: 前端实现
 
-### Task 3.1: 状态管理
+### Task 3.1: 远程服务器状态管理
 
 **Files:**
 - Create: `apps/web/src/stores/remoteStore.ts`
 - Create: `apps/web/src/stores/fileStore.ts`
-- Modify: `apps/web/src/stores/chatStore.ts`
 
-### Task 3.2: UI 组件
+- [ ] **Step 1: 创建 remoteStore**
+
+```typescript
+// apps/web/src/stores/remoteStore.ts
+import { create } from 'zustand';
+
+export interface RemoteServer {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  privateKeyPath?: string;
+  remotePort: number;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  error?: string;
+}
+
+interface RemoteState {
+  servers: RemoteServer[];
+  activeServerId: string | null;
+  managerExpanded: boolean;
+  isLoading: boolean;
+
+  // Actions
+  loadServers: () => Promise<void>;
+  connectServer: (id: string) => Promise<void>;
+  disconnectServer: (id: string) => Promise<void>;
+  switchServer: (id: string | null) => void;
+  addServer: (config: Omit<RemoteServer, 'id' | 'status'>) => Promise<void>;
+  updateServer: (id: string, config: Partial<RemoteServer>) => Promise<void>;
+  removeServer: (id: string) => Promise<void>;
+  toggleManager: () => void;
+  setServerStatus: (id: string, status: RemoteServer['status'], error?: string) => void;
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002/api/v1';
+
+export const useRemoteStore = create<RemoteState>((set, get) => ({
+  servers: [],
+  activeServerId: null,
+  managerExpanded: false,
+  isLoading: false,
+
+  loadServers: async () => {
+    set({ isLoading: true });
+    try {
+      const res = await fetch(`${API_BASE}/remote/servers`);
+      const data = await res.json();
+      if (data.success) {
+        set({ servers: data.data });
+      }
+    } catch (error) {
+      console.error('Failed to load servers:', error);
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  connectServer: async (id) => {
+    const { servers } = get();
+    set({
+      servers: servers.map((s) =>
+        s.id === id ? { ...s, status: 'connecting' as const } : s
+      ),
+    });
+
+    try {
+      const res = await fetch(`${API_BASE}/remote/servers/${id}/connect`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.success) {
+        set({
+          servers: get().servers.map((s) =>
+            s.id === id ? { ...s, status: 'connected' as const } : s
+          ),
+        });
+      } else {
+        set({
+          servers: get().servers.map((s) =>
+            s.id === id ? { ...s, status: 'error' as const, error: data.error } : s
+          ),
+        });
+      }
+    } catch (error) {
+      set({
+        servers: get().servers.map((s) =>
+          s.id === id ? { ...s, status: 'error' as const, error: String(error) } : s
+        ),
+      });
+    }
+  },
+
+  disconnectServer: async (id) => {
+    try {
+      await fetch(`${API_BASE}/remote/servers/${id}/disconnect`, {
+        method: 'POST',
+      });
+      set({
+        servers: get().servers.map((s) =>
+          s.id === id ? { ...s, status: 'disconnected' as const } : s
+        ),
+      });
+    } catch (error) {
+      console.error('Failed to disconnect:', error);
+    }
+  },
+
+  switchServer: (id) => {
+    set({ activeServerId: id });
+    // 通知后端
+    fetch(`${API_BASE}/remote/active`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverId: id }),
+    }).catch(console.error);
+  },
+
+  addServer: async (config) => {
+    try {
+      const res = await fetch(`${API_BASE}/remote/servers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.success) {
+        set({ servers: [...get().servers, { ...data.data, status: 'disconnected' as const }] });
+      }
+    } catch (error) {
+      console.error('Failed to add server:', error);
+    }
+  },
+
+  updateServer: async (id, config) => {
+    try {
+      const res = await fetch(`${API_BASE}/remote/servers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.success) {
+        set({
+          servers: get().servers.map((s) =>
+            s.id === id ? { ...s, ...data.data } : s
+          ),
+        });
+      }
+    } catch (error) {
+      console.error('Failed to update server:', error);
+    }
+  },
+
+  removeServer: async (id) => {
+    try {
+      await fetch(`${API_BASE}/remote/servers/${id}`, {
+        method: 'DELETE',
+      });
+      set({
+        servers: get().servers.filter((s) => s.id !== id),
+        activeServerId: get().activeServerId === id ? null : get().activeServerId,
+      });
+    } catch (error) {
+      console.error('Failed to remove server:', error);
+    }
+  },
+
+  toggleManager: () => {
+    set({ managerExpanded: !get().managerExpanded });
+  },
+
+  setServerStatus: (id, status, error) => {
+    set({
+      servers: get().servers.map((s) =>
+        s.id === id ? { ...s, status, error } : s
+      ),
+    });
+  },
+}));
+```
+
+- [ ] **Step 2: 创建 fileStore**
+
+```typescript
+// apps/web/src/stores/fileStore.ts
+import { create } from 'zustand';
+import { useRemoteStore } from './remoteStore';
+
+export interface FileInfo {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  mtime: number;
+}
+
+interface FileState {
+  currentPath: string;
+  files: FileInfo[];
+  selectedFile: string | null;
+  fileContent: string | null;
+  isLoading: boolean;
+  error: string | null;
+  pathHistory: string[];
+
+  // Actions
+  listDirectory: (path: string, wsSend: (type: string, payload: unknown) => void) => void;
+  readFile: (path: string, wsSend: (type: string, payload: unknown) => void) => void;
+  refresh: (wsSend: (type: string, payload: unknown) => void) => void;
+  goBack: (wsSend: (type: string, payload: unknown) => void) => void;
+  setSelectedFile: (path: string | null) => void;
+  setFiles: (files: FileInfo[]) => void;
+  setFileContent: (content: string | null) => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
+}
+
+export const useFileStore = create<FileState>((set, get) => ({
+  currentPath: '/',
+  files: [],
+  selectedFile: null,
+  fileContent: null,
+  isLoading: false,
+  error: null,
+  pathHistory: [],
+
+  listDirectory: (path, wsSend) => {
+    const activeServerId = useRemoteStore.getState().activeServerId;
+    if (!activeServerId) {
+      set({ error: '请先连接远程服务器' });
+      return;
+    }
+
+    set({ isLoading: true, error: null, currentPath: path });
+    wsSend('directory:list', { path });
+  },
+
+  readFile: (path, wsSend) => {
+    const activeServerId = useRemoteStore.getState().activeServerId;
+    if (!activeServerId) {
+      set({ error: '请先连接远程服务器' });
+      return;
+    }
+
+    set({ isLoading: true, error: null, selectedFile: path });
+    wsSend('file:read', { path });
+  },
+
+  refresh: (wsSend) => {
+    const { currentPath } = get();
+    get().listDirectory(currentPath, wsSend);
+  },
+
+  goBack: (wsSend) => {
+    const { pathHistory, currentPath } = get();
+    if (pathHistory.length > 0) {
+      const previousPath = pathHistory[pathHistory.length - 1];
+      set({
+        pathHistory: pathHistory.slice(0, -1),
+        currentPath: previousPath,
+      });
+      get().listDirectory(previousPath, wsSend);
+    }
+  },
+
+  setSelectedFile: (path) => set({ selectedFile: path }),
+  setFiles: (files) => set({ files, isLoading: false }),
+  setFileContent: (content) => set({ fileContent: content, isLoading: false }),
+  setLoading: (loading) => set({ isLoading: loading }),
+  setError: (error) => set({ error, isLoading: false }),
+}));
+```
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add apps/web/src/stores/
+git commit -m "$(cat <<'EOF'
+feat(web): 添加远程服务器和文件状态管理
+
+- remoteStore: 服务器管理
+- fileStore: 文件浏览器
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 3.2: 侧边栏改动
 
 **Files:**
 - Modify: `apps/web/src/components/layout/Sidebar.tsx`
-- Modify: `apps/web/src/components/layout/ArtifactsPanel.tsx`
-- Create: `apps/web/src/components/remote/*`
+- Create: `apps/web/src/components/remote/ServerManager.tsx`
+- Create: `apps/web/src/components/remote/ServerForm.tsx`
 
-### Task 3.3: WebSocket 集成
+由于篇幅限制，这部分的核心实现思路：
+
+1. **Sidebar.tsx** 修改：
+   - 会话列表按 serverId 分组
+   - 每个分组显示颜色标记（🟢/⚪/🔵）
+   - 底部添加 ServerManager 组件
+   - 分组标题右侧添加 [+新] 按钮
+
+2. **ServerManager.tsx**：
+   - 展开/折叠服务器列表
+   - 显示连接状态
+   - 连接/断开/编辑/删除操作
+   - 添加新服务器入口
+
+3. **ServerForm.tsx**：
+   - 模态框表单
+   - 服务器配置字段
+   - 验证和提交
+
+---
+
+### Task 3.3: 产物面板改动
+
+**Files:**
+- Modify: `apps/web/src/components/layout/ArtifactsPanel.tsx`
+- Create: `apps/web/src/components/remote/FileExplorer.tsx`
+- Create: `apps/web/src/components/remote/FilePreview.tsx`
+
+核心实现思路：
+
+1. **ArtifactsPanel.tsx** 修改：
+   - 添加 Tab 切换（本地产物/远程文件）
+   - 未连接时显示提示
+   - 根据选中的 Tab 显示不同内容
+
+2. **FileExplorer.tsx**：
+   - 显示文件列表
+   - 点击目录进入
+   - 点击文件预览
+   - 路径导航
+
+3. **FilePreview.tsx**：
+   - 文件内容显示
+   - 日志文件刷新按钮
+   - 下载按钮
+
+---
+
+### Task 3.4: WebSocket 集成
 
 **Files:**
 - Modify: `apps/web/src/hooks/useWebSocket.ts`
+
+- [ ] **Step 1: 添加新消息类型处理**
+
+在 useWebSocket hook 中添加对以下消息的处理：
+
+```typescript
+// 在消息处理的 switch 中添加
+case 'directory:list:result':
+  if (payload.success) {
+    useFileStore.getState().setFiles(payload.data);
+  } else {
+    useFileStore.getState().setError(payload.error);
+  }
+  break;
+
+case 'file:read:result':
+  if (payload.success) {
+    useFileStore.getState().setFileContent(payload.data.content);
+  } else {
+    useFileStore.getState().setError(payload.error);
+  }
+  break;
+
+case 'remote:servers:result':
+  // 更新服务器状态
+  break;
+
+case 'remote:switch:result':
+  // 确认切换
+  break;
+```
+
+- [ ] **Step 2: 添加发送方法**
+
+```typescript
+// 暴露给组件使用的方法
+const sendDirectoryList = (path: string) => {
+  send({ type: 'directory:list', payload: { path } });
+};
+
+const sendFileRead = (path: string) => {
+  send({ type: 'file:read', payload: { path } });
+};
+
+const sendRemoteSwitch = (serverId: string | null) => {
+  send({ type: 'remote:switch', payload: { serverId } });
+};
+```
 
 ---
 

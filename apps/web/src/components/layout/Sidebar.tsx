@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check, Search, Bot, Users, Clock, Folder, FileText } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useRemoteStore } from '@/stores/remoteStore';
 import { cn } from '@/lib/utils';
+import { ServerManager } from '@/components/remote/ServerManager';
 
 // 导航项组件
 function NavItem({
@@ -53,6 +55,7 @@ export function Sidebar() {
     setSearchQuery,
   } = useChatStore();
   const { switchConversation, createConversation: createConversationWS, renameConversation, togglePinConversation, deleteConversation } = useWebSocket();
+  const { servers, activeServerId, switchServer } = useRemoteStore();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -144,6 +147,59 @@ export function Sidebar() {
   );
   const pinnedConversations = filteredConversations.filter((c) => c.pinned);
   const unpinnedConversations = filteredConversations.filter((c) => !c.pinned);
+
+  // 按 serverId 分组会话
+  const groupedConversations = useMemo(() => {
+    const groups: Map<string | null, typeof unpinnedConversations> = new Map();
+    unpinnedConversations.forEach((conv) => {
+      const serverId = conv.serverId || null;
+      if (!groups.has(serverId)) {
+        groups.set(serverId, []);
+      }
+      groups.get(serverId)!.push(conv);
+    });
+    return groups;
+  }, [unpinnedConversations]);
+
+  // 获取服务器状态指示器
+  const getServerIndicator = (serverId: string | null) => {
+    if (!serverId) {
+      // 本地会话
+      return '\u{1F7E2}'; // 绿色圆圈
+    }
+    const server = servers.find((s) => s.id === serverId);
+    if (!server) {
+      return '\u{26AA}'; // 白色圆圈 (服务器不存在)
+    }
+    switch (server.status) {
+      case 'connected':
+        return '\u{1F7E2}'; // 绿色圆圈
+      case 'connecting':
+        return '\u{1F535}'; // 蓝色圆圈
+      case 'error':
+        return '\u{1F534}'; // 红色圆圈
+      default:
+        return '\u{26AA}'; // 白色圆圈
+    }
+  };
+
+  // 获取服务器名称
+  const getServerName = (serverId: string | null) => {
+    if (!serverId) return '本地';
+    const server = servers.find((s) => s.id === serverId);
+    return server?.name || '未知服务器';
+  };
+
+  // 在指定服务器上创建新对话
+  const handleNewChatOnServer = (serverId: string | null) => {
+    const id = createConversation();
+    // 设置会话的 serverId（需要在 createConversation 后更新）
+    useChatStore.getState().updateConversation(id, { serverId });
+    createConversationWS(id);
+    if (serverId && activeServerId !== serverId) {
+      switchServer(serverId);
+    }
+  };
 
   // Conversation item component
   const ConversationItem = ({ conv }: { conv: { id: string; title?: string | null; pinned: boolean } }) => {

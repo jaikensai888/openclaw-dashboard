@@ -54,6 +54,7 @@ interface Conversation {
   createdAt: Date;
   updatedAt: Date;
   expertId?: string | null;  // 新增
+  serverId?: string | null;  // 归属服务器 ID，null 为本地
 }
 
 interface Message {

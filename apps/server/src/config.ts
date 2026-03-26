@@ -2,6 +2,17 @@
  * Dashboard Server Configuration
  */
 
+export interface RemoteServerConfig {
+  id: string;
+  name: string;
+  host: string;
+  port: number;              // SSH 端口，默认 22
+  username: string;
+  privateKey?: string;       // 私钥内容
+  privateKeyPath?: string;   // 私钥文件路径
+  remotePort: number;        // remote-server 端口，默认 3001
+}
+
 export interface OpenclawGatewayConfig {
   /** Gateway WebSocket URL (e.g., wss://gateway.example/ws) */
   url: string;
@@ -24,6 +35,11 @@ export interface AppConfig {
   };
   /** Openclaw Gateway direct connection configuration */
   openclawGateway?: OpenclawGatewayConfig;
+  /** Remote server connection configuration */
+  remote?: {
+    enabled: boolean;
+    servers: RemoteServerConfig[];
+  };
 }
 
 const defaultConfig: AppConfig = {
@@ -31,6 +47,10 @@ const defaultConfig: AppConfig = {
   host: '0.0.0.0',
   database: {
     path: './data/dashboard.db',
+  },
+  remote: {
+    enabled: false,
+    servers: [],
   },
 };
 
@@ -48,6 +68,10 @@ export function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       connectionTimeout: 30000,
       ...overrides.openclawGateway,
     } : undefined,
+    remote: overrides.remote ? {
+      ...defaultConfig.remote,
+      ...overrides.remote,
+    } : defaultConfig.remote,
   };
 }
 
@@ -84,6 +108,14 @@ export function loadConfigFromEnv(): Partial<AppConfig> {
       connectionTimeout: process.env.OPENCLAW_GATEWAY_CONNECTION_TIMEOUT
         ? parseInt(process.env.OPENCLAW_GATEWAY_CONNECTION_TIMEOUT, 10)
         : undefined,
+    };
+  }
+
+  // 远程配置
+  if (process.env.REMOTE_ENABLED === 'true') {
+    config.remote = {
+      enabled: true,
+      servers: [], // 服务器列表从数据库加载
     };
   }
 

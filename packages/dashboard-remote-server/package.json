@@ -1,0 +1,45 @@
+{
+  "name": "@openclaw/dashboard-remote-server",
+  "version": "0.1.0",
+  "description": "Remote server for bridging Dashboard and OpenClaw Gateway",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "config"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.3",
+    "pino": "^8.17.0",
+    "pino-pretty": "^10.3.0",
+    "vscode-jsonrpc": "^8.2.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "openclaw",
+    "dashboard",
+    "remote",
+    "gateway",
+    "jsonrpc"
+  ],
+  "license": "MIT"
+}

@@ -19,6 +19,7 @@ import {
   type Artifact,
 } from '../services/artifactStorage.js';
 import { parseFileSavedMarkers } from '../services/messageParser.js';
+import { getRemoteConnectionManager } from '../remote/index.js';
 import type { TaskType, WSChatSendWithAgentPayload, VirtualAgentId } from '@openclaw-dashboard/shared';
 
 interface ClientConnection {
@@ -112,6 +113,34 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
 
     case 'artifacts.load':
       handleLoadArtifacts(ws, payload as { conversationId: string });
+      break;
+
+    case 'file:read':
+      handleFileRead(ws, payload as { path: string });
+      break;
+
+    case 'file:write':
+      handleFileWrite(ws, payload as { path: string; content: string });
+      break;
+
+    case 'directory:list':
+      handleDirectoryList(ws, payload as { path: string; recursive?: boolean });
+      break;
+
+    case 'watch:subscribe':
+      handleWatchSubscribe(ws, payload as { path: string });
+      break;
+
+    case 'watch:unsubscribe':
+      handleWatchUnsubscribe(ws, payload as { subscriptionId: string });
+      break;
+
+    case 'remote:servers':
+      handleRemoteServers(ws);
+      break;
+
+    case 'remote:switch':
+      handleRemoteSwitch(ws, payload as { serverId: string | null });
       break;
 
     default:
@@ -428,6 +457,138 @@ async function handleLoadArtifacts(ws: WebSocket, payload: { conversationId: str
     conversationId,
     artifacts,
   });
+}
+
+async function handleFileRead(ws: WebSocket, payload: { path: string }) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'MANAGER_NOT_INITIALIZED', 'RemoteConnectionManager not initialized');
+    return;
+  }
+
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    const content = await client.readFile(payload.path);
+    send(ws, 'file:read:result', { success: true, data: content });
+  } catch (error) {
+    send(ws, 'file:read:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleFileWrite(ws: WebSocket, payload: { path: string; content: string }) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'MANAGER_NOT_INITIALIZED', 'RemoteConnectionManager not initialized');
+    return;
+  }
+
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    await client.writeFile(payload.path, payload.content);
+    send(ws, 'file:write:result', { success: true });
+  } catch (error) {
+    send(ws, 'file:write:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleDirectoryList(ws: WebSocket, payload: { path: string; recursive?: boolean }) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'MANAGER_NOT_INITIALIZED', 'RemoteConnectionManager not initialized');
+    return;
+  }
+
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    const files = await client.listDirectory(payload.path, payload.recursive);
+    send(ws, 'directory:list:result', { success: true, data: files });
+  } catch (error) {
+    send(ws, 'directory:list:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleWatchSubscribe(ws: WebSocket, payload: { path: string }) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'MANAGER_NOT_INITIALIZED', 'RemoteConnectionManager not initialized');
+    return;
+  }
+
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    const result = await client.watchSubscribe(payload.path);
+    send(ws, 'watch:subscribe:result', { success: true, data: result });
+  } catch (error) {
+    send(ws, 'watch:subscribe:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleWatchUnsubscribe(ws: WebSocket, payload: { subscriptionId: string }) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'MANAGER_NOT_INITIALIZED', 'RemoteConnectionManager not initialized');
+    return;
+  }
+
+  const client = manager.getActiveClient();
+
+  if (!client) {
+    sendError(ws, 'NO_REMOTE_CONNECTION', 'No active remote connection');
+    return;
+  }
+
+  try {
+    await client.watchUnsubscribe(payload.subscriptionId);
+    send(ws, 'watch:unsubscribe:result', { success: true });
+  } catch (error) {
+    send(ws, 'watch:unsubscribe:result', { success: false, error: String(error) });
+  }
+}
+
+async function handleRemoteServers(ws: WebSocket) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'MANAGER_NOT_INITIALIZED', 'RemoteConnectionManager not initialized');
+    return;
+  }
+
+  const statuses = manager.getAllServersStatus();
+  send(ws, 'remote:servers:result', { success: true, data: statuses });
+}
+
+function handleRemoteSwitch(ws: WebSocket, payload: { serverId: string | null }) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'MANAGER_NOT_INITIALIZED', 'RemoteConnectionManager not initialized');
+    return;
+  }
+
+  manager.setActiveServer(payload.serverId);
+  send(ws, 'remote:switch:result', { success: true, activeServerId: payload.serverId });
 }
 
 function setupPluginMessageHandlers() {

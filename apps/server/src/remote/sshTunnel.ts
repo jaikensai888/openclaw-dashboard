@@ -2,6 +2,7 @@
 import { Client, type ConnectConfig } from 'ssh2';
 import type { RemoteServerConfig, SSHTunnelStatus } from './types.js';
 import fs from 'node:fs';
+import net from 'node:net';
 import type { Logger } from 'pino';
 
 interface TunnelOptions {
@@ -18,6 +19,8 @@ export class SSHTunnel {
   private _status: SSHTunnelStatus;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private localPort: number = 0;
+  private localServer: net.Server | null = null;
+  private activeConnections = new Set<net.Socket>();
 
   constructor(options: TunnelOptions) {
     this.serverConfig = options.serverConfig;
@@ -71,35 +74,34 @@ export class SSHTunnel {
       }
 
       this.conn.on('ready', () => {
-        this.logger.info('SSH connection established, creating port forward');
+        this.logger.info('SSH connection established, creating local port forward');
 
-        // 创建本地端口转发
-        this.conn!.forwardOut(
-          '127.0.0.1',
-          0,  // 本地端口由系统分配
-          '127.0.0.1',
-          this.serverConfig.remotePort,
-          (err, stream) => {
-            if (err) {
-              this.logger.error({ error: String(err) }, 'Port forward failed');
-              this.updateStatus({ status: 'error', error: String(err) });
-              reject(err);
-              return;
-            }
+        // 创建本地 TCP 服务器
+        this.localServer = net.createServer((localSocket) => {
+          this.handleLocalConnection(localSocket);
+        });
 
-            // 获取本地端口（需要通过额外的方式获取）
-            // 这里简化处理，使用固定端口范围
-            this.localPort = 13000 + Math.floor(Math.random() * 1000);
+        this.localServer.listen(0, '127.0.0.1', () => {
+          const address = this.localServer!.address() as net.AddressInfo;
+          this.localPort = address.port;
 
-            this.updateStatus({
-              status: 'connected',
-              localPort: this.localPort,
-            });
+          this.updateStatus({
+            status: 'connected',
+            localPort: this.localPort,
+          });
 
-            this.logger.info({ localPort: this.localPort }, 'SSH tunnel established');
-            resolve(this.localPort);
-          }
-        );
+          this.logger.info(
+            { localPort: this.localPort, remotePort: this.serverConfig.remotePort },
+            'SSH tunnel established'
+          );
+          resolve(this.localPort);
+        });
+
+        this.localServer.on('error', (err) => {
+          this.logger.error({ error: String(err) }, 'Local server error');
+          this.updateStatus({ status: 'error', error: String(err) });
+          reject(err);
+        });
       });
 
       this.conn.on('error', (err) => {
@@ -112,6 +114,7 @@ export class SSHTunnel {
       this.conn.on('close', () => {
         this.logger.info('SSH connection closed');
         this.updateStatus({ status: 'disconnected' });
+        this.closeLocalServer();
         this.scheduleReconnect();
       });
 
@@ -119,17 +122,79 @@ export class SSHTunnel {
     });
   }
 
+  private handleLocalConnection(localSocket: net.Socket) {
+    if (!this.conn) {
+      localSocket.destroy();
+      return;
+    }
+
+    this.activeConnections.add(localSocket);
+    localSocket.on('close', () => {
+      this.activeConnections.delete(localSocket);
+    });
+
+    // 通过 SSH 隧道转发到远程服务
+    this.conn.forwardOut(
+      '127.0.0.1',
+      this.localPort,
+      '127.0.0.1',
+      this.serverConfig.remotePort,
+      (err, remoteStream) => {
+        if (err) {
+          this.logger.error({ error: String(err) }, 'Forward connection failed');
+          localSocket.destroy();
+          return;
+        }
+
+        // 双向管道连接
+        localSocket.pipe(remoteStream);
+        remoteStream.pipe(localSocket);
+
+        remoteStream.on('close', () => {
+          localSocket.destroy();
+        });
+
+        localSocket.on('error', (err: Error) => {
+          this.logger.debug({ error: String(err) }, 'Local socket error');
+          remoteStream.destroy();
+        });
+
+        remoteStream.on('error', (err: Error) => {
+          this.logger.debug({ error: String(err) }, 'Remote stream error');
+          localSocket.destroy();
+        });
+      }
+    );
+  }
+
+  private closeLocalServer() {
+    // 关闭所有活动连接
+    for (const socket of this.activeConnections) {
+      socket.destroy();
+    }
+    this.activeConnections.clear();
+
+    // 关闭本地服务器
+    if (this.localServer) {
+      this.localServer.close();
+      this.localServer = null;
+    }
+  }
+
   private scheduleReconnect() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
     }
+
+    // 指数退避重连
+    const delay = Math.min(5000 * Math.pow(2, this._status.status === 'error' ? 1 : 0), 60000);
 
     this.reconnectTimer = setTimeout(() => {
       this.logger.info('Attempting to reconnect SSH tunnel');
       this.connect().catch((err) => {
         this.logger.error({ error: String(err) }, 'Reconnect failed');
       });
-    }, 5000);
+    }, delay);
   }
 
   async disconnect(): Promise<void> {
@@ -137,6 +202,8 @@ export class SSHTunnel {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+
+    this.closeLocalServer();
 
     if (this.conn) {
       return new Promise((resolve) => {

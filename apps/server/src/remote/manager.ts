@@ -39,18 +39,27 @@ export class RemoteConnectionManager {
       throw new Error(`Server config not found: ${serverId}`);
     }
 
-    this.logger.info({ serverId }, 'Connecting to remote server');
+    this.logger.info({ serverId, directUrl: config.directUrl }, 'Connecting to remote server');
 
-    // 创建 SSH 隧道
-    const localPort = await this.tunnelManager.createTunnel(
-      config,
-      () => this.notifyStatusChange(serverId)
-    );
+    let wsUrl: string;
+
+    // 直连模式：跳过 SSH 隧道，直接连接 WebSocket
+    if (config.directUrl) {
+      this.logger.info({ directUrl: config.directUrl }, 'Using direct connection mode');
+      wsUrl = config.directUrl;
+    } else {
+      // SSH 隧道模式
+      const localPort = await this.tunnelManager.createTunnel(
+        config,
+        () => this.notifyStatusChange(serverId)
+      );
+      wsUrl = `ws://127.0.0.1:${localPort}`;
+    }
 
     // 创建 RPC 客户端
     const client = new RemoteClient({
-      url: `ws://127.0.0.1:${localPort}`,
-      token: process.env.REMOTE_AUTH_TOKEN,
+      url: wsUrl,
+      token: config.authToken || process.env.REMOTE_AUTH_TOKEN,
       logger: this.logger.child({ serverId }),
       onAgentEvent: (event) => {
         this.options.onAgentEvent?.(serverId, event);
@@ -62,11 +71,13 @@ export class RemoteConnectionManager {
 
     await client.connect();
 
-    // 自动连接 Gateway
-    try {
-      await client.gatewayConnect();
-    } catch (error) {
-      this.logger.warn({ error: String(error) }, 'Failed to connect gateway');
+    // 自动连接 Gateway（如果配置了）
+    if (config.gatewayUrl) {
+      try {
+        await client.gatewayConnect();
+      } catch (error) {
+        this.logger.warn({ error: String(error) }, 'Failed to connect gateway');
+      }
     }
 
     this.clients.set(serverId, client);

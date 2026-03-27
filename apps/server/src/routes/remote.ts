@@ -12,6 +12,9 @@ interface RemoteServerRow {
   username: string;
   private_key_path: string | null;
   remote_port: number;
+  direct_url: string | null;
+  auth_token: string | null;
+  gateway_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +28,10 @@ function rowToConfig(row: RemoteServerRow): RemoteServerConfig {
     username: row.username,
     privateKeyPath: row.private_key_path || undefined,
     remotePort: row.remote_port,
+    // 直连模式字段
+    directUrl: row.direct_url || undefined,
+    authToken: row.auth_token || undefined,
+    gatewayUrl: row.gateway_url || undefined,
   };
 }
 
@@ -79,15 +86,32 @@ export async function remoteRoutes(fastify: FastifyInstance) {
       username: string;
       privateKeyPath?: string;
       remotePort?: number;
+      // 直连模式
+      directUrl?: string;
+      authToken?: string;
+      gatewayUrl?: string;
     };
 
     const id = uuidv4();
     const now = new Date().toISOString();
 
     run(
-      `INSERT INTO remote_servers (id, name, host, port, username, private_key_path, remote_port, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, body.name, body.host, body.port ?? 22, body.username, body.privateKeyPath ?? null, body.remotePort ?? 3001, now, now]
+      `INSERT INTO remote_servers (id, name, host, port, username, private_key_path, remote_port, direct_url, auth_token, gateway_url, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        body.name,
+        body.host,
+        body.port ?? 22,
+        body.username,
+        body.privateKeyPath ?? null,
+        body.remotePort ?? 3001,
+        body.directUrl ?? null,
+        body.authToken ?? null,
+        body.gatewayUrl ?? null,
+        now,
+        now,
+      ]
     );
 
     const row = get<RemoteServerRow>('SELECT * FROM remote_servers WHERE id = ?', [id]);
@@ -104,6 +128,9 @@ export async function remoteRoutes(fastify: FastifyInstance) {
       username: string;
       privateKeyPath: string;
       remotePort: number;
+      directUrl: string;
+      authToken: string;
+      gatewayUrl: string;
     }>;
     const now = new Date().toISOString();
 
@@ -113,7 +140,7 @@ export async function remoteRoutes(fastify: FastifyInstance) {
     }
 
     run(
-      `UPDATE remote_servers SET name = ?, host = ?, port = ?, username = ?, private_key_path = ?, remote_port = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE remote_servers SET name = ?, host = ?, port = ?, username = ?, private_key_path = ?, remote_port = ?, direct_url = ?, auth_token = ?, gateway_url = ?, updated_at = ? WHERE id = ?`,
       [
         body.name ?? existing.name,
         body.host ?? existing.host,
@@ -121,6 +148,9 @@ export async function remoteRoutes(fastify: FastifyInstance) {
         body.username ?? existing.username,
         body.privateKeyPath ?? existing.private_key_path,
         body.remotePort ?? existing.remote_port,
+        body.directUrl ?? existing.direct_url,
+        body.authToken ?? existing.auth_token,
+        body.gatewayUrl ?? existing.gateway_url,
         now,
         id,
       ]

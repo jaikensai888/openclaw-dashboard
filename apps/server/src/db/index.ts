@@ -277,6 +277,27 @@ function runMigrations(database: SqlJsDatabase): void {
   } catch (err) {
     console.error('[DB] Migration error:', err);
   }
+
+  // Migration 11: Add direct_url, auth_token, gateway_url to remote_servers
+  try {
+    const columns = database.exec("PRAGMA table_info(remote_servers)");
+    const columnNames = columns[0]?.values?.map((v) => v[1] as string) || [];
+
+    if (!columnNames.includes('direct_url')) {
+      console.log('[DB] Migration: Adding direct_url column to remote_servers');
+      database.run("ALTER TABLE remote_servers ADD COLUMN direct_url TEXT");
+    }
+    if (!columnNames.includes('auth_token')) {
+      console.log('[DB] Migration: Adding auth_token column to remote_servers');
+      database.run("ALTER TABLE remote_servers ADD COLUMN auth_token TEXT");
+    }
+    if (!columnNames.includes('gateway_url')) {
+      console.log('[DB] Migration: Adding gateway_url column to remote_servers');
+      database.run("ALTER TABLE remote_servers ADD COLUMN gateway_url TEXT");
+    }
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
 }
 
 export function closeDatabase(): void {

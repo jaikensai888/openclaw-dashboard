@@ -9,6 +9,10 @@ export interface RemoteServerConfig {
   privateKey?: string;       // 私钥内容
   privateKeyPath?: string;   // 私钥文件路径
   remotePort: number;        // remote-server 端口，默认 3001
+  // 直连模式（本地测试用）
+  directUrl?: string;        // 直连 WebSocket URL，如 ws://127.0.0.1:3001
+  authToken?: string;        // 认证 token
+  gatewayUrl?: string;       // Gateway URL（可选）
 }
 
 export interface SSHTunnelStatus {

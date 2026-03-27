@@ -244,6 +244,60 @@ function runMigrations(database: SqlJsDatabase): void {
   } catch (err) {
     console.error('[DB] Migration error:', err);
   }
+
+  // Migration 9: Create remote_servers table
+  try {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS remote_servers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        host TEXT NOT NULL,
+        port INTEGER DEFAULT 22,
+        username TEXT NOT NULL,
+        private_key_path TEXT,
+        remote_port INTEGER DEFAULT 3001,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('[DB] Migration: remote_servers table created');
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
+
+  // Migration 10: Add server_id to conversations
+  try {
+    const columns = database.exec("PRAGMA table_info(conversations)");
+    const columnNames = columns[0]?.values?.map((v) => v[1] as string) || [];
+
+    if (!columnNames.includes('server_id')) {
+      console.log('[DB] Migration: Adding server_id column to conversations');
+      database.run("ALTER TABLE conversations ADD COLUMN server_id TEXT");
+    }
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
+
+  // Migration 11: Add direct_url, auth_token, gateway_url to remote_servers
+  try {
+    const columns = database.exec("PRAGMA table_info(remote_servers)");
+    const columnNames = columns[0]?.values?.map((v) => v[1] as string) || [];
+
+    if (!columnNames.includes('direct_url')) {
+      console.log('[DB] Migration: Adding direct_url column to remote_servers');
+      database.run("ALTER TABLE remote_servers ADD COLUMN direct_url TEXT");
+    }
+    if (!columnNames.includes('auth_token')) {
+      console.log('[DB] Migration: Adding auth_token column to remote_servers');
+      database.run("ALTER TABLE remote_servers ADD COLUMN auth_token TEXT");
+    }
+    if (!columnNames.includes('gateway_url')) {
+      console.log('[DB] Migration: Adding gateway_url column to remote_servers');
+      database.run("ALTER TABLE remote_servers ADD COLUMN gateway_url TEXT");
+    }
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
 }
 
 export function closeDatabase(): void {

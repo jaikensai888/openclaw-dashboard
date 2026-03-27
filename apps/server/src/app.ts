@@ -16,6 +16,7 @@ import { automationRoutes } from './routes/automations.js';
 import { rulesRoutes } from './routes/rules.js';
 import { websocketRoutes } from './routes/websocket.js';
 import { pluginRoutes } from './routes/plugin.js';
+import { remoteRoutes } from './routes/remote.js';
 import { pluginManager } from './services/pluginManager.js';
 import { createConfig, AppConfig } from './config.js';
 import { initGatewayClient, getGatewayClient } from './services/openclawGatewayClient.js';
@@ -128,6 +129,7 @@ export async function createApp(config: Partial<AppConfig> = {}) {
     api.register(categoryRoutes);
     api.register(automationRoutes);
     api.register(rulesRoutes);
+    api.register(remoteRoutes);
   }, { prefix: '/api/v1' });
 
   // WebSocket routes

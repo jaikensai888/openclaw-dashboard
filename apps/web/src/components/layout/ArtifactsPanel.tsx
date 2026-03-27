@@ -1,12 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, FileText, Code, Image, File, Download, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
+import { X, FileText, Code, Image, File, Download, Trash2, ArrowLeft, Loader2, Folder } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useRemoteStore } from '@/stores/remoteStore';
+import { useFileStore, FileInfo } from '@/stores/fileStore';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/api';
+import { FileExplorer } from '@/components/remote/FileExplorer';
+import { FilePreview } from '@/components/remote/FilePreview';
 
 type ViewMode = 'list' | 'preview';
+type TabMode = 'artifacts' | 'remote';
 
 interface ArtifactContent {
   id: string;
@@ -27,10 +32,26 @@ export function ArtifactsPanel() {
     currentConversationId,
   } = useChatStore();
 
+  const { activeServerId, servers } = useRemoteStore();
+  const { setSelectedFile, readFile } = useFileStore();
+
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [tabMode, setTabMode] = useState<TabMode>('artifacts');
   const [previewContent, setPreviewContent] = useState<ArtifactContent | null>(null);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
+  const [remotePreviewFile, setRemotePreviewFile] = useState<FileInfo | null>(null);
+
+  const activeServer = servers.find((s) => s.id === activeServerId);
+  const isConnected = activeServer?.status === 'connected';
+
+  // Expose WebSocket send function globally for remote components
+  useEffect(() => {
+    const win = window as unknown as { __wsSend?: (type: string, payload: unknown) => void };
+    import('@/hooks/useWebSocket').then(({ send }) => {
+      win.__wsSend = send;
+    });
+  }, []);
 
   if (!artifactsPanelOpen) return null;
 
@@ -73,7 +94,7 @@ export function ArtifactsPanel() {
     if (!selectedArtifact) return;
     try {
       const res = await fetch(`${API_BASE_URL}/artifacts/${selectedArtifact.id}/download`);
-      if (!res.ok) throw new Error('下载失败');
+      if (!res.ok) throw new Error('Download failed');
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -89,13 +110,12 @@ export function ArtifactsPanel() {
   };
 
   const handleDelete = async () => {
-    if (!selectedArtifact || !confirm('确定要删除此产物吗？')) return;
+    if (!selectedArtifact || !confirm('Are you sure you want to delete this artifact?')) return;
     try {
       const res = await fetch(`${API_BASE_URL}/artifacts/${selectedArtifact.id}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('删除失败');
-      // Clear selection and go back to list
+      if (!res.ok) throw new Error('Delete failed');
       setSelectedArtifactId(null);
       setViewMode('list');
       setPreviewContent(null);
@@ -117,11 +137,11 @@ export function ArtifactsPanel() {
       if (data.success) {
         setPreviewContent(data.data);
       } else {
-        setContentError(data.error || '加载失败');
+        setContentError(data.error || 'Load failed');
       }
     } catch (error) {
       console.error('Failed to load artifact content:', error);
-      setContentError('加载内容失败');
+      setContentError('Load content failed');
     } finally {
       setIsLoadingContent(false);
     }
@@ -134,13 +154,30 @@ export function ArtifactsPanel() {
     setContentError(null);
   };
 
+  const handleTabChange = (tab: TabMode) => {
+    setTabMode(tab);
+    if (tab === 'artifacts') {
+      setRemotePreviewFile(null);
+      setSelectedFile(null);
+    }
+  };
+
+  const handleRemoteFileSelect = (file: FileInfo) => {
+    setRemotePreviewFile(file);
+  };
+
+  const handleRemotePreviewBack = () => {
+    setRemotePreviewFile(null);
+    setSelectedFile(null);
+  };
+
   // Render preview content based on file type
   const renderPreviewContent = () => {
     if (isLoadingContent) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
           <Loader2 className="w-8 h-8 mb-3 animate-spin" />
-          <span className="text-sm">加载中...</span>
+          <span className="text-sm">Loading...</span>
         </div>
       );
     }
@@ -158,7 +195,7 @@ export function ArtifactsPanel() {
       return (
         <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
           <File className="w-12 h-12 mb-3 opacity-50" />
-          <span className="text-sm">无内容</span>
+          <span className="text-sm">No content</span>
         </div>
       );
     }
@@ -167,8 +204,8 @@ export function ArtifactsPanel() {
       return (
         <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
           <File className="w-12 h-12 mb-3 opacity-50" />
-          <span className="text-sm">AI 声称已保存此文件</span>
-          <span className="text-xs mt-1 text-neutral-600">（内容在 Gateway 端）</span>
+          <span className="text-sm">AI claims to have saved this file</span>
+          <span className="text-xs mt-1 text-neutral-600">(Content is on Gateway side)</span>
         </div>
       );
     }
@@ -186,7 +223,6 @@ export function ArtifactsPanel() {
     }
 
     if (previewContent.content) {
-      // Check if it's markdown
       const isMarkdown = previewContent.title?.endsWith('.md') || previewContent.type === 'document';
 
       if (isMarkdown) {
@@ -199,7 +235,6 @@ export function ArtifactsPanel() {
         );
       }
 
-      // Code preview
       return (
         <div className="p-4 overflow-auto h-full">
           <pre className="text-xs text-neutral-300 font-mono whitespace-pre-wrap break-all">
@@ -212,13 +247,40 @@ export function ArtifactsPanel() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-neutral-500 p-4">
         <File className="w-12 h-12 mb-3 opacity-50" />
-        <span className="text-sm">无预览内容</span>
+        <span className="text-sm">No preview content</span>
         <button
           onClick={handleDownload}
           className="mt-3 px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 rounded text-xs text-neutral-300 transition-colors"
         >
-          下载文件
+          Download File
         </button>
+      </div>
+    );
+  };
+
+  // Render remote files tab content
+  const renderRemoteContent = () => {
+    if (!isConnected) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center text-neutral-500 p-4 text-center">
+          <Folder className="w-12 h-12 mb-3 opacity-30" />
+          <p className="text-sm">Please connect to a remote server first</p>
+          <p className="text-xs mt-1 text-neutral-600">Connect to browse remote files</p>
+        </div>
+      );
+    }
+
+    if (remotePreviewFile) {
+      return (
+        <div className="flex-1 overflow-hidden">
+          <FilePreview file={remotePreviewFile} onBack={handleRemotePreviewBack} />
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex-1 overflow-hidden">
+        <FileExplorer onFileSelect={handleRemoteFileSelect} />
       </div>
     );
   };
@@ -240,26 +302,26 @@ export function ArtifactsPanel() {
           'transform transition-transform duration-300 ease-in-out'
         )}
         role="complementary"
-        aria-label="产物面板"
+        aria-label="Artifacts Panel"
       >
         {/* Header */}
         <div className="p-4 border-b border-neutral-700">
           <div className="flex items-center justify-between">
-            {viewMode === 'preview' ? (
+            {tabMode === 'artifacts' && viewMode === 'preview' ? (
               <>
                 <button
                   onClick={handleBackToList}
                   className="flex items-center gap-1.5 text-neutral-300 hover:text-neutral-100 transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />
-                  <span className="text-sm">返回</span>
+                  <span className="text-sm">Back</span>
                 </button>
                 <div className="flex items-center gap-1">
                   {!selectedArtifact?.metadata?.isReference && (
                     <button
                       onClick={handleDownload}
                       className="p-1.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200 transition-colors"
-                      aria-label="下载"
+                      aria-label="Download"
                     >
                       <Download className="w-4 h-4" />
                     </button>
@@ -267,14 +329,14 @@ export function ArtifactsPanel() {
                   <button
                     onClick={handleDelete}
                     className="p-1.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-red-400 transition-colors"
-                    aria-label="删除"
+                    aria-label="Delete"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => setArtifactsPanelOpen(false)}
                     className="p-1.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200 transition-colors"
-                    aria-label="关闭面板"
+                    aria-label="Close panel"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -283,17 +345,24 @@ export function ArtifactsPanel() {
             ) : (
               <>
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-sm font-medium text-neutral-200">产物面板</h2>
-                  {currentConversationId && (
+                  <h2 className="text-sm font-medium text-neutral-200">
+                    {tabMode === 'artifacts' ? 'Local Artifacts' : 'Remote Files'}
+                  </h2>
+                  {tabMode === 'artifacts' && currentConversationId && (
                     <p className="text-xs text-neutral-500 mt-0.5 truncate" title={`data/conversations/${currentConversationId}/`}>
-                      📁 data/conversations/{currentConversationId}/
+                      data/conversations/{currentConversationId}/
+                    </p>
+                  )}
+                  {tabMode === 'remote' && activeServer && (
+                    <p className="text-xs text-neutral-500 mt-0.5 truncate">
+                      {activeServer.host}:{activeServer.port}
                     </p>
                   )}
                 </div>
                 <button
                   onClick={() => setArtifactsPanelOpen(false)}
                   className="p-1.5 hover:bg-neutral-700 rounded-lg transition-colors flex-shrink-0 ml-2"
-                  aria-label="关闭面板"
+                  aria-label="Close panel"
                 >
                   <X className="w-4 h-4 text-neutral-400" />
                 </button>
@@ -302,64 +371,98 @@ export function ArtifactsPanel() {
           </div>
 
           {/* Preview mode: show filename */}
-          {viewMode === 'preview' && selectedArtifact && (
+          {tabMode === 'artifacts' && viewMode === 'preview' && selectedArtifact && (
             <div className="mt-2 pt-2 border-t border-neutral-700">
               <p className="text-sm font-medium text-neutral-200 truncate">{selectedArtifact.title}</p>
             </div>
           )}
         </div>
 
+        {/* Tab Switcher - only show in list mode */}
+        {!(tabMode === 'artifacts' && viewMode === 'preview') && !remotePreviewFile && (
+          <div className="flex border-b border-neutral-700">
+            <button
+              onClick={() => handleTabChange('artifacts')}
+              className={cn(
+                'flex-1 py-2 px-3 text-xs font-medium transition-colors',
+                tabMode === 'artifacts'
+                  ? 'text-primary-400 border-b-2 border-primary-400'
+                  : 'text-neutral-500 hover:text-neutral-300'
+              )}
+            >
+              Local Artifacts
+            </button>
+            <button
+              onClick={() => handleTabChange('remote')}
+              className={cn(
+                'flex-1 py-2 px-3 text-xs font-medium transition-colors flex items-center justify-center gap-1.5',
+                tabMode === 'remote'
+                  ? 'text-primary-400 border-b-2 border-primary-400'
+                  : 'text-neutral-500 hover:text-neutral-300'
+              )}
+            >
+              <Folder className="w-3 h-3" />
+              Remote Files
+              {isConnected && (
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Content */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          {viewMode === 'list' ? (
-            // List view
-            currentConversationArtifacts.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm p-4 text-center">
-                <div>
-                  <File className="w-12 h-12 mx-auto mb-3 opacity-30" aria-hidden="true" />
-                  <p>尚无产物生成</p>
-                  <p className="text-xs mt-1">AI 生成的代码将自动保存</p>
+          {tabMode === 'artifacts' ? (
+            viewMode === 'list' ? (
+              currentConversationArtifacts.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm p-4 text-center">
+                  <div>
+                    <File className="w-12 h-12 mx-auto mb-3 opacity-30" aria-hidden="true" />
+                    <p>No artifacts generated yet</p>
+                    <p className="text-xs mt-1">AI generated code will be saved automatically</p>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                {currentConversationArtifacts.map((artifact) => {
-                  const Icon = getArtifactIcon(artifact.type);
+              ) : (
+                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                  {currentConversationArtifacts.map((artifact) => {
+                    const Icon = getArtifactIcon(artifact.type);
 
-                  return (
-                    <button
-                      key={artifact.id}
-                      onClick={() => handleSelectArtifact(artifact.id)}
-                      className="w-full text-left p-3 rounded-lg bg-neutral-700/50 hover:bg-neutral-700 border border-transparent transition-colors"
-                    >
-                      <div className="flex items-start gap-3">
-                        <Icon className="w-5 h-5 text-primary-400 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate text-neutral-200">
-                            {artifact.title}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <p className="text-xs text-neutral-500">
-                              {formatTime(artifact.createdAt)}
+                    return (
+                      <button
+                        key={artifact.id}
+                        onClick={() => handleSelectArtifact(artifact.id)}
+                        className="w-full text-left p-3 rounded-lg bg-neutral-700/50 hover:bg-neutral-700 border border-transparent transition-colors"
+                      >
+                        <div className="flex items-start gap-3">
+                          <Icon className="w-5 h-5 text-primary-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate text-neutral-200">
+                              {artifact.title}
                             </p>
-                            {artifact.metadata?.size !== undefined && typeof artifact.metadata.size === 'number' && (
-                              <p className="text-xs text-neutral-600">
-                                {formatSize(artifact.metadata.size)}
+                            <div className="flex items-center gap-2 mt-1">
+                              <p className="text-xs text-neutral-500">
+                                {formatTime(artifact.createdAt)}
                               </p>
-                            )}
+                              {artifact.metadata?.size !== undefined && typeof artifact.metadata.size === 'number' && (
+                                <p className="text-xs text-neutral-600">
+                                  {formatSize(artifact.metadata.size)}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            ) : (
+              <div className="flex-1 overflow-hidden bg-neutral-900">
+                {renderPreviewContent()}
               </div>
             )
           ) : (
-            // Preview view
-            <div className="flex-1 overflow-hidden bg-neutral-900">
-              {renderPreviewContent()}
-            </div>
+            renderRemoteContent()
           )}
         </div>
       </aside>

@@ -6,7 +6,93 @@
  */
 
 import WebSocket from 'ws';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import type { AppConfig } from '../config.js';
+
+// Device identity types
+interface DeviceIdentity {
+  deviceId: string;
+  publicKeyPem: string;
+  privateKeyPem: string;
+}
+
+function base64url(buf: Buffer): string {
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function normalizeDeviceMetadata(value: string | undefined): string {
+  if (typeof value !== 'string') return '';
+  const t = value.trim();
+  return t ? t.toLowerCase() : '';
+}
+
+function getRawPublicKeyBase64url(publicKeyPem: string): string {
+  const der = crypto.createPublicKey(publicKeyPem).export({ type: 'spki', format: 'der' });
+  return base64url(der.slice(-32));
+}
+
+function generateDeviceIdentity(stateDir: string): DeviceIdentity {
+  const identityDir = path.join(stateDir, 'identity');
+  fs.mkdirSync(identityDir, { recursive: true });
+
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
+  const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
+
+  const rawPubKey = getRawPublicKeyBase64url(publicKeyPem);
+  const deviceId = crypto.createHash('sha256').update(rawPubKey).digest('hex');
+
+  const identity: DeviceIdentity = {
+    deviceId,
+    publicKeyPem,
+    privateKeyPem,
+  };
+
+  const devicePath = path.join(identityDir, 'device.json');
+  fs.writeFileSync(devicePath, JSON.stringify({
+    version: 1,
+    ...identity,
+    createdAtMs: Date.now(),
+  }, null, 2), { mode: 0o600 });
+
+  console.log('[Gateway] Generated new device identity:', deviceId);
+  return identity;
+}
+
+function loadDeviceIdentity(): DeviceIdentity | null {
+  const stateDir = process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), '.openclaw');
+  const devicePath = path.join(stateDir, 'identity', 'device.json');
+  try {
+    if (!fs.existsSync(devicePath)) {
+      return generateDeviceIdentity(stateDir);
+    }
+    const data = JSON.parse(fs.readFileSync(devicePath, 'utf8'));
+    if (!data.deviceId || !data.publicKeyPem || !data.privateKeyPem) return null;
+    return data as DeviceIdentity;
+  } catch {
+    return null;
+  }
+}
+
+function buildDeviceAuthPayloadV3(params: {
+  deviceId: string; clientId: string; clientMode: string; role: string;
+  scopes: string; signedAtMs: number; token: string; nonce: string;
+  platform: string | undefined; deviceFamily: string | undefined;
+}): string {
+  return [
+    'v3', params.deviceId, params.clientId, params.clientMode, params.role,
+    params.scopes, String(params.signedAtMs), params.token, params.nonce,
+    normalizeDeviceMetadata(params.platform), normalizeDeviceMetadata(params.deviceFamily),
+  ].join('|');
+}
+
+function signDevicePayload(privateKeyPem: string, payload: string): string {
+  const key = crypto.createPrivateKey(privateKeyPem);
+  return base64url(crypto.sign(null, Buffer.from(payload, 'utf8'), key));
+}
 
 // Gateway protocol types
 interface GatewayRequest {
@@ -40,11 +126,12 @@ export interface AgentEvent {
   runId: string;
   stream?: 'lifecycle' | 'assistant' | 'start' | 'delta' | 'end';  // Include both Gateway and internal formats
   data?: {
-    phase?: 'start' | 'end';  // for lifecycle events (Gateway format)
+    phase?: 'start' | 'end' | 'error';  // for lifecycle events (Gateway format)
     text?: string;            // for assistant events - full text (Gateway format)
     delta?: string;           // for assistant/delta events - incremental
     content?: string;         // accumulated content
     done?: boolean;
+    error?: string;           // for error events
   };
 }
 
@@ -165,7 +252,10 @@ export class OpenclawGatewayClient {
       messageContent = `[系统指令: ${options.systemPrompt}]\n\n${messageContent}`;
     }
 
-    const agentId = options.virtualAgentId || 'main';
+    // Map Dashboard's 'default' virtual agent to Gateway's 'main' agent
+    const agentId = (!options.virtualAgentId || options.virtualAgentId === 'default')
+      ? 'main'
+      : options.virtualAgentId;
     const result = await this.sendRequest('agent', {
       idempotencyKey: `dash_${options.conversationId}_${Date.now()}`,
       sessionKey: `agent:${agentId}:main`,
@@ -258,22 +348,57 @@ export class OpenclawGatewayClient {
     console.log('[Gateway] Received challenge with nonce:', challenge.nonce);
     console.log('[Gateway] Sending connect request...');
 
-    // Send connect request matching Openclaw Gateway protocol
-    // client.id must be "cli" and client.mode must be "backend" for Gateway to accept
+    const nonce = challenge.nonce;
+    const role = 'operator';
+    const scopes = ['operator.read', 'operator.write', 'agent', 'agent.wait'];
+    const signedAtMs = Date.now();
+    const platform = process.platform;
+
+    // Load device identity for Ed25519 authentication
+    const deviceIdentity = loadDeviceIdentity();
+    let deviceAuth: Record<string, unknown> | undefined;
+
+    if (deviceIdentity) {
+      const payload = buildDeviceAuthPayloadV3({
+        deviceId: deviceIdentity.deviceId,
+        clientId: 'gateway-client',
+        clientMode: 'backend',
+        role,
+        scopes: scopes.join(','),
+        signedAtMs,
+        token: this.options.token,
+        nonce,
+        platform,
+        deviceFamily: undefined,
+      });
+      const signature = signDevicePayload(deviceIdentity.privateKeyPem, payload);
+      deviceAuth = {
+        id: deviceIdentity.deviceId,
+        publicKey: getRawPublicKeyBase64url(deviceIdentity.publicKeyPem),
+        signature,
+        signedAt: signedAtMs,
+        nonce,
+      };
+      console.log('[Gateway] Device identity loaded, signing challenge');
+    } else {
+      console.log('[Gateway] No device identity found, connecting with token-only auth (limited scopes)');
+    }
+
     const connectParams = {
       minProtocol: 3,
       maxProtocol: 3,
       client: {
-        id: 'cli',
+        id: 'gateway-client',
         mode: 'backend',
         version: '1.0.0',
-        platform: 'node',
+        platform,
       },
-      role: 'operator',
-      scopes: ['operator.read', 'operator.write', 'agent', 'agent.wait'],
+      role,
+      scopes,
       auth: {
         token: this.options.token,
       },
+      device: deviceAuth,
     };
 
     this.sendRequest('connect', connectParams)
@@ -297,6 +422,7 @@ export class OpenclawGatewayClient {
       const phase = event.data?.phase;
 
       if (phase === 'start') {
+
         convertedEvent = {
           runId: event.runId,
           stream: 'start',
@@ -312,6 +438,19 @@ export class OpenclawGatewayClient {
           data: {
             content,
             done: true,
+          },
+        };
+        // Clean up
+        runContentMap.delete(event.runId);
+      } else if (phase === 'error') {
+        const errorMsg = event.data?.error || 'Unknown agent error';
+        convertedEvent = {
+          runId: event.runId,
+          stream: 'end',
+          data: {
+            content: `Error: ${errorMsg}`,
+            done: true,
+            error: errorMsg,
           },
         };
         // Clean up

@@ -129,3 +129,16 @@ CREATE TABLE IF NOT EXISTS rules (
 -- Rules indexes
 CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(is_enabled);
 CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority);
+
+-- Remote servers table (远程服务器配置)
+CREATE TABLE IF NOT EXISTS remote_servers (
+    id TEXT PRIMARY KEY,              -- UUID, format: server_xxx
+    name TEXT NOT NULL,               -- 服务器名称
+    host TEXT NOT NULL,               -- 服务器地址
+    port INTEGER DEFAULT 22,          -- SSH 端口
+    username TEXT NOT NULL,           -- SSH 用户名
+    private_key_path TEXT,            -- SSH 私钥路径
+    remote_port INTEGER DEFAULT 3001, -- remote-server 端口
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

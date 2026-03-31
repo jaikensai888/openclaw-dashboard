@@ -3,8 +3,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, Plus, Settings, Trash2, Menu, X, Pin, Pencil, Check, Search, Bot, Users, Clock, Folder, FileText } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useRemoteStore } from '@/stores/remoteStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
+import { ServerManager } from '@/components/remote/ServerManager';
 
 // 导航项组件
 function NavItem({
@@ -52,6 +54,7 @@ export function Sidebar() {
     searchQuery,
     setSearchQuery,
   } = useChatStore();
+  const { servers, activeServerId } = useRemoteStore();
   const { switchConversation, createConversation: createConversationWS, renameConversation, togglePinConversation, deleteConversation } = useWebSocket();
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -145,8 +148,32 @@ export function Sidebar() {
   const pinnedConversations = filteredConversations.filter((c) => c.pinned);
   const unpinnedConversations = filteredConversations.filter((c) => !c.pinned);
 
+  // 按服务器分组会话
+  const localConversations = unpinnedConversations.filter((c) => !c.serverId);
+  const serverGroups = servers.map((server) => ({
+    server,
+    conversations: unpinnedConversations.filter((c) => c.serverId === server.id),
+  }));
+
+  // 获取服务器状态颜色
+  const getServerStatusColor = (serverId: string | null | undefined) => {
+    if (!serverId) return 'bg-blue-500'; // 本地
+    const server = servers.find((s) => s.id === serverId);
+    if (!server) return 'bg-neutral-500';
+    switch (server.status) {
+      case 'connected':
+        return 'bg-green-500';
+      case 'connecting':
+        return 'bg-yellow-500 animate-pulse';
+      case 'error':
+        return 'bg-red-500';
+      default:
+        return 'bg-neutral-500';
+    }
+  };
+
   // Conversation item component
-  const ConversationItem = ({ conv }: { conv: { id: string; title?: string | null; pinned: boolean } }) => {
+  const ConversationItem = ({ conv, showServerIndicator = true }: { conv: { id: string; title?: string | null; pinned: boolean; serverId?: string | null }; showServerIndicator?: boolean }) => {
     const isEditing = editingId === conv.id;
 
     return (
@@ -163,7 +190,10 @@ export function Sidebar() {
         )}
       >
         <div className="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
-          <MessageSquare className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+          {showServerIndicator && (
+            <div className={cn('w-2 h-2 rounded-full flex-shrink-0', getServerStatusColor(conv.serverId))} />
+          )}
+          {!showServerIndicator && <MessageSquare className="w-4 h-4 text-neutral-400 flex-shrink-0" />}
           {isEditing ? (
             <div className="flex items-center gap-1 flex-1" onClick={(e) => e.stopPropagation()}>
               <input
@@ -374,9 +404,11 @@ export function Sidebar() {
               {/* Pinned conversations */}
               {pinnedConversations.length > 0 && (
                 <>
-                  <div className="px-3 py-2 text-xs text-neutral-500 font-medium">置顶</div>
+                  <div className="px-3 py-2 text-xs text-neutral-500 font-medium flex items-center justify-between">
+                    <span>置顶</span>
+                  </div>
                   {pinnedConversations.map((conv) => (
-                    <ConversationItem key={conv.id} conv={conv} />
+                    <ConversationItem key={conv.id} conv={conv} showServerIndicator={true} />
                   ))}
                   {unpinnedConversations.length > 0 && (
                     <div className="my-2 border-t border-neutral-700" />
@@ -384,24 +416,66 @@ export function Sidebar() {
                 </>
               )}
 
-              {/* Unpinned conversations */}
-              {unpinnedConversations.length > 0 && pinnedConversations.length > 0 && (
-                <div className="px-3 py-2 text-xs text-neutral-500 font-medium">对话</div>
+              {/* Local conversations */}
+              {localConversations.length > 0 && (
+                <>
+                  <div className="px-3 py-2 text-xs text-neutral-500 font-medium flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-500" />
+                      本地开发
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleNewChat();
+                      }}
+                      className="p-0.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200"
+                      title="新建本地会话"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {localConversations.map((conv) => (
+                    <ConversationItem key={conv.id} conv={conv} showServerIndicator={false} />
+                  ))}
+                </>
               )}
-              {unpinnedConversations.map((conv) => (
-                <ConversationItem key={conv.id} conv={conv} />
+
+              {/* Server conversations */}
+              {serverGroups.map(({ server, conversations: serverConvs }) => (
+                serverConvs.length > 0 && (
+                  <div key={server.id}>
+                    <div className="px-3 py-2 text-xs text-neutral-500 font-medium flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <span className={cn('w-2 h-2 rounded-full', getServerStatusColor(server.id))} />
+                        {server.name}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // 创建该服务器的会话，绑定 serverId
+                          const id = createConversation(undefined, server.id);
+                          createConversationWS(id, undefined, server.id);
+                        }}
+                        className="p-0.5 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200"
+                        title={`新建 ${server.name} 会话`}
+                        disabled={server.status !== 'connected'}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    {serverConvs.map((conv) => (
+                      <ConversationItem key={conv.id} conv={conv} showServerIndicator={false} />
+                    ))}
+                  </div>
+                )
               ))}
             </div>
           )}
         </div>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-neutral-700">
-          <div className="flex items-center gap-2 text-xs text-neutral-500">
-            <div className="w-2 h-2 rounded-full bg-green-500" aria-hidden="true" />
-            <span>已连接</span>
-          </div>
-        </div>
+        {/* Server Manager */}
+        <ServerManager />
       </aside>
     </>
   );

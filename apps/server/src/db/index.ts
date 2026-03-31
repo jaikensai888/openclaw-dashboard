@@ -244,6 +244,34 @@ function runMigrations(database: SqlJsDatabase): void {
   } catch (err) {
     console.error('[DB] Migration error:', err);
   }
+
+  // Migration 9: Create remote_servers table + add server_id to conversations
+  try {
+    database.run(`
+      CREATE TABLE IF NOT EXISTS remote_servers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        host TEXT NOT NULL,
+        port INTEGER DEFAULT 22,
+        username TEXT NOT NULL,
+        private_key_path TEXT,
+        remote_port INTEGER DEFAULT 3001,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    const columns = database.exec("PRAGMA table_info(conversations)");
+    const columnNames = columns[0]?.values?.map((v) => v[1] as string) || [];
+    if (!columnNames.includes('server_id')) {
+      console.log('[DB] Migration: Adding server_id column to conversations');
+      database.run('ALTER TABLE conversations ADD COLUMN server_id TEXT');
+    }
+
+    console.log('[DB] Migration 9: remote_servers table created, server_id added to conversations');
+  } catch (err) {
+    console.error('[DB] Migration error:', err);
+  }
 }
 
 export function closeDatabase(): void {

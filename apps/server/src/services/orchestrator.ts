@@ -31,6 +31,7 @@ import {
   isHandoffDepthValid,
 } from './handoffParser.js';
 import { renderRulesForConversation } from './ruleService.js';
+import { getRemoteConnectionManager } from '../remote/manager.js';
 
 /**
  * 构建文件保存协议指令，注入到所有 agent 的 system prompt
@@ -67,6 +68,7 @@ export interface HandleUserMessageOptions {
   virtualAgentId?: VirtualAgentId;
   history?: Array<{ role: 'user' | 'assistant'; content: string }>;
   expertSystemPrompt?: string;
+  serverId?: string;
 }
 
 export interface OrchestratorEvent {
@@ -103,7 +105,7 @@ export class Orchestrator {
       });
       console.log('[Orchestrator] Started with Gateway connection');
     } else {
-      console.log('[Orchestrator] Started without Gateway (plugin mode only)');
+      console.log('[Orchestrator] Started without Gateway connection');
     }
   }
 
@@ -132,7 +134,7 @@ export class Orchestrator {
    * Handle a user message - route to appropriate agent
    */
   async handleUserMessage(options: HandleUserMessageOptions): Promise<{ runId?: string; error?: string }> {
-    const { conversationId, content, virtualAgentId, history, expertSystemPrompt } = options;
+    const { conversationId, content, virtualAgentId, history, expertSystemPrompt, serverId } = options;
 
     // Get or create conversation state
     let state = this.conversationStates.get(conversationId);
@@ -165,6 +167,11 @@ export class Orchestrator {
       data: { agent: toActiveAgentInfo(agent) },
     });
 
+    // Remote mode: if serverId is provided, route via remote server
+    if (serverId) {
+      return this.runViaRemote(conversationId, serverId, agent, content, state, effectiveSystemPrompt);
+    }
+
     // Try Gateway direct connection first
     const gateway = getGatewayClient();
     if (gateway?.isConnected()) {
@@ -172,7 +179,7 @@ export class Orchestrator {
     }
 
     // Fall back to plugin mode (handled by websocket.ts)
-    return { error: 'No gateway connection, falling back to plugin mode' };
+    return { error: 'Gateway 未连接' };
   }
 
   /**
@@ -309,6 +316,53 @@ export class Orchestrator {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('[Orchestrator] Gateway run failed:', message);
+      return { error: message };
+    }
+  }
+
+  /**
+   * Run agent via remote server connection
+   */
+  private async runViaRemote(
+    conversationId: string,
+    serverId: string,
+    agent: VirtualAgent,
+    content: string,
+    state: ConversationState,
+    systemPrompt?: string
+  ): Promise<{ runId?: string; error?: string }> {
+    const manager = getRemoteConnectionManager();
+    if (!manager) {
+      return { error: '远程连接管理器未初始化' };
+    }
+
+    const client = manager.getClient(serverId) || manager.getActiveClient();
+    if (!client || !client.isConnected) {
+      return { error: '远程服务器未连接' };
+    }
+
+    try {
+      const enhancedSystemPrompt = (systemPrompt || agent.systemPrompt) + renderRulesForConversation(conversationId);
+
+      await client.runAgent({
+        conversationId,
+        message: content,
+        expertId: agent.id !== 'default' ? agent.id : undefined,
+        systemPrompt: enhancedSystemPrompt,
+      });
+
+      // Use a synthetic runId for tracking
+      const runId = `remote_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      this.runMappings.set(runId, {
+        runId,
+        virtualAgentId: agent.id,
+        conversationId,
+      });
+
+      return { runId };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Orchestrator] Remote run failed:', message);
       return { error: message };
     }
   }

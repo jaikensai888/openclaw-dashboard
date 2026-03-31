@@ -68,7 +68,7 @@
 | 包名 | 用途 |
 |------|------|
 | `@openclaw-dashboard/shared` | 前后端共享类型定义 |
-| `@openclaw-dashboard/dashboard-plugin` | Openclaw 插件包 |
+| `@openclaw-dashboard/dashboard-remote-server` | 远程服务器 sidecar，桥接 Gateway 和文件系统 |
 
 ### 2.4 开发工具
 
@@ -118,24 +118,24 @@
 │                     Backend (Fastify 4)                                  │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │                        Routes Layer                              │    │
-│  │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────────┐ │    │
-│  │  │ /ws        │ │ /api/v1/   │ │ /ws/plugin │ │ Static Files │ │    │
-│  │  │ WebSocket  │ │ REST API   │ │ Plugin WS  │ │              │ │    │
-│  │  └─────┬──────┘ └─────┬──────┘ └─────┬──────┘ └──────────────┘ │    │
-│  └────────┼──────────────┼──────────────┼─────────────────────────┘    │
-│           │              │              │                               │
-│  ┌────────▼──────────────▼──────────────▼─────────────────────────┐    │
+│  │  ┌────────────┐ ┌────────────┐ ┌──────────────┐                 │    │
+│  │  │ /ws        │ │ /api/v1/   │ │ Static Files │                 │    │
+│  │  │ WebSocket  │ │ REST API   │ │              │                 │    │
+│  │  └─────┬──────┘ └─────┬──────┘ └──────────────┘                 │    │
+│  └────────┼──────────────┼────────────────────────────────────────┘    │
+│           │              │                                             │
+│  ┌────────▼──────────────▼─────────────────────────────────────────┐    │
 │  │                     Services Layer                               │    │
 │  │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐ │    │
 │  │  │ Orchestrator │ │ TaskManager  │ │ ArtifactStorage        │ │    │
 │  │  │ - 消息路由   │ │ - 任务管理   │ │ - 文件存储             │ │    │
 │  │  │ - Agent 选择 │ │ - 状态追踪   │ │ - 元数据管理           │ │    │
 │  │  └──────────────┘ └──────────────┘ └────────────────────────┘ │    │
-│  │  ┌──────────────┐ ┌──────────────┐ ┌────────────────────────┐ │    │
-│  │  │PluginManager │ │MessageParser │ │OpenclawGatewayClient   │ │    │
-│  │  │- 插件连接    │ │- 协议解析    │ │- Gateway 连接          │ │    │
-│  │  │- 认证管理    │ │- 提取处理    │ │- 事件流处理            │ │    │
-│  │  └──────────────┘ └──────────────┘ └────────────────────────┘ │    │
+│  │  ┌──────────────┐ ┌────────────────────────────────────────┐ │    │
+│  │  │MessageParser │ │OpenclawGatewayClient                   │ │    │
+│  │  │- 协议解析    │ │- Gateway 连接                          │ │    │
+│  │  │- 提取处理    │ │- 事件流处理                            │ │    │
+│  │  └──────────────┘ └────────────────────────────────────────┘ │    │
 │  └───────────────────────────────────────────────────────────────┘    │
 │           │                              │                             │
 │  ┌────────▼──────────────────────────────▼─────────────────────────┐  │
@@ -164,6 +164,31 @@
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 3.1a 远程连接架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    远程连接架构                               │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Dashboard Server                                            │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ Remote Connection Manager                               │  │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐              │  │
+│  │  │SSH Tunnel│  │SSH Tunnel│  │JSON-RPC  │              │  │
+│  │  │ Server-B │  │ Server-C │  │ Client   │              │  │
+│  │  └────┬─────┘  └────┬─────┘  └────┬─────┘              │  │
+│  └───────┼──────────────┼─────────────┼───────────────────┘  │
+└──────────┼──────────────┼─────────────┼──────────────────────┘
+           │ SSH          │             │ WebSocket
+           ▼              ▼             ▼
+  ┌─────────────┐  ┌─────────────┐
+  │ Server B     │  │ Server C     │
+  │ remote-server│  │ remote-server│
+  │ + Gateway    │  │ + Gateway    │
+  └─────────────┘  └─────────────┘
+```
+
 ### 3.2 核心组件
 
 | 组件 | 位置 | 职责 |
@@ -171,12 +196,13 @@
 | **Orchestrator** | server/services | 消息路由、Agent 选择、交接逻辑 |
 | **TaskManager** | server/services | 任务生命周期管理、输出管理 |
 | **ArtifactStorage** | server/services | 文件存储、元数据管理 |
-| **PluginManager** | server/services | 插件 WebSocket 连接、认证 |
 | **MessageParser** | server/services | 任务协议解析、代码块提取 |
 | **OpenclawGatewayClient** | server/services | Gateway 连接、事件流处理 |
 | **RuleService** | server/services | 规则模板管理、变量插值、渲染 |
 | **chatStore** | web/stores | 前端全局状态管理 |
 | **useWebSocket** | web/hooks | WebSocket 连接管理 |
+| **RemoteConnectionManager** | server/remote | SSH 隧道、JSON-RPC 客户端、服务器切换 |
+| **dashboard-remote-server** | packages/ | 远程 sidecar，Gateway 桥接、文件系统 |
 
 ### 3.3 通信方式
 
@@ -185,6 +211,7 @@
 | **实时通信** | WebSocket | 聊天、任务更新、流式响应 |
 | **数据操作** | REST API | CRUD 操作（会话、专家、自动化、产物） |
 | **Gateway 通信** | WebSocket | Agent 交互、事件流 |
+| **远程通信** | WebSocket + JSON-RPC | SSH 隧道到远程 dashboard-remote-server |
 
 ---
 
@@ -259,7 +286,6 @@ openclaw-dashboard/
 │       │   │
 │       │   ├── routes/                # API 路由
 │       │   │   ├── websocket.ts       # 前端 WebSocket
-│       │   │   ├── plugin.ts          # 插件 WebSocket
 │       │   │   ├── conversations.ts   # 会话 CRUD
 │       │   │   ├── messages.ts        # 消息 CRUD
 │       │   │   ├── tasks.ts           # 任务 CRUD
@@ -272,7 +298,6 @@ openclaw-dashboard/
 │       │   │   ├── orchestrator.ts    # 编排服务
 │       │   │   ├── taskManager.ts     # 任务管理
 │       │   │   ├── artifactStorage.ts # 产物存储
-│       │   │   ├── pluginManager.ts   # 插件管理
 │       │   │   ├── messageParser.ts   # 消息解析
 │       │   │   ├── openclawGatewayClient.ts
 │       │   │   ├── virtualAgents.ts   # 虚拟 Agent
@@ -290,13 +315,9 @@ openclaw-dashboard/
 │       └── tsconfig.json
 │
 ├── packages/
-│   ├── shared/                        # 共享类型包
-│   │   └── types/
-│   │       ├── src/index.ts           # 类型定义
-│   │       └── package.json
-│   │
-│   └── dashboard-plugin/              # Openclaw 插件包
-│       └── package/
+│   └── shared/                        # 共享类型包
+│       └── types/
+│           ├── src/index.ts           # 类型定义
 │           └── package.json
 │
 ├── docs/
@@ -497,26 +518,17 @@ openclaw-dashboard/
 | 重连间隔 | `OPENCLAW_GATEWAY_RECONNECT_INTERVAL` | 默认 5000ms |
 | 连接超时 | `OPENCLAW_GATEWAY_CONNECTION_TIMEOUT` | 默认 30000ms |
 
-### 7.2 双模式支持
+### 7.2 连接架构
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    连接模式                              │
+│                    连接架构                              │
 ├─────────────────────────────────────────────────────────┤
 │                                                          │
-│  模式 1: Gateway 直连（推荐）                            │
 │  ┌─────────┐    WebSocket     ┌─────────┐              │
 │  │Dashboard│ ◄──────────────► │ Gateway │              │
 │  └─────────┘                  └─────────┘              │
 │                                                          │
-│  模式 2: 插件模式（备用）                                │
-│  ┌─────────┐    WebSocket     ┌─────────┐              │
-│  │Dashboard│ ◄──────────────► │ Plugin  │              │
-│  └─────────┘                  └─────────┘              │
-│                                     │                   │
-│                                Openclaw                  │
-│                                                          │
-│  自动降级：配置了 Gateway 则直连，否则使用插件模式       │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -529,7 +541,6 @@ openclaw-dashboard/
 | 组件 | 认证方式 | 说明 |
 |------|----------|------|
 | **前端 WebSocket** | 无认证 | 本地部署，信任本地连接 |
-| **插件 WebSocket** | Token 认证 | `PLUGIN_TOKEN` 环境变量 |
 | **Gateway 连接** | Token 认证 | `OPENCLAW_GATEWAY_TOKEN` |
 
 ### 8.2 数据安全
@@ -630,7 +641,7 @@ apps/server/data/
 |--------|----------|
 | **同步数据库** | sql.js 同步 API，避免回调开销 |
 | **WebSocket 复用** | 单一连接处理所有通信 |
-| **内存缓存** | 插件连接状态内存管理 |
+| **内存缓存** | 连接状态内存管理 |
 
 ### 10.3 性能指标
 
@@ -646,5 +657,6 @@ apps/server/data/
 
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
+| 2026-03-30 | 1.2 | 新增远程连接架构描述 |
 | 2026-03-23 | 1.1 | 新增 RuleService 规则系统架构 |
 | 2026-03-21 | 1.0 | 基于现有代码逆向生成技术架构文档 |

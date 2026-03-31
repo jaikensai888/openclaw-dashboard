@@ -16,14 +16,18 @@
     "@openclaw-dashboard/shared": "workspace:*",
     "dotenv": "^17.3.1",
     "fastify": "^4.26.0",
+    "pino": "^8.21.0",
     "sql.js": "^1.10.0",
+    "ssh2": "^1.17.0",
     "uuid": "^9.0.0",
     "ws": "^8.16.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@types/pino": "^7.0.5",
     "@types/sql.js": "^1.4.9",
+    "@types/ssh2": "^1.15.5",
     "@types/uuid": "^9.0.0",
     "@types/ws": "^8.5.0",
     "tsx": "^4.7.0",

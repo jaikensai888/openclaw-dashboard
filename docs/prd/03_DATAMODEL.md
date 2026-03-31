@@ -1,6 +1,6 @@
 # Openclaw Dashboard - 数据模型设计
 
-*版本：1.0 | 状态：已实现 | 更新时间：2026-03-21*
+*版本：1.2 | 状态：已实现 | 更新时间：2026-03-30*
 
 ---
 
@@ -30,6 +30,7 @@
 | Automation | 📦 现有 | 自动化实体 |
 | Artifact | 📦 现有 | 产物实体 |
 | Rule | 🆕 新增 | 规则实体 |
+| RemoteServer | 🆕 新增 | 远程服务器配置实体 |
 
 ### 1.3 核心实体关系总览
 
@@ -50,6 +51,9 @@
 自动化 (Automation) 为独立实体
 
 规则 (Rule) 为独立实体，用于会话初始化
+
+远程服务器 (RemoteServer) 为独立实体，通过 server_id 关联：
+└── 会话 (Conversation) - N:1
 ```
 
 ---
@@ -69,6 +73,20 @@ erDiagram
 
     Expert }o--o| Category : "belongs to"
 
+    Conversation }o--o| RemoteServer : "belongs to"
+
+    RemoteServer {
+        string id PK
+        string name
+        string host
+        integer port
+        string username
+        string private_key_path
+        integer remote_port
+        datetime created_at
+        datetime updated_at
+    }
+
     Automation {
         string id PK
         string title
@@ -82,6 +100,7 @@ erDiagram
         string title
         boolean pinned
         string expert_id FK
+        string server_id FK
         datetime created_at
         datetime updated_at
     }
@@ -174,6 +193,7 @@ erDiagram
 | `title` | TEXT | - | NULL | 会话标题（首个用户消息自动生成） |
 | `pinned` | INTEGER | - | 0 | 是否置顶 (0: 否, 1: 是) |
 | `expert_id` | TEXT | FK, NULL | - | 关联的专家 ID |
+| `server_id` | TEXT | FK, NULL | - | 关联的远程服务器 ID（null 为本地） |
 | `created_at` | DATETIME | - | CURRENT_TIMESTAMP | 创建时间 |
 | `updated_at` | DATETIME | - | CURRENT_TIMESTAMP | 更新时间 |
 
@@ -367,6 +387,29 @@ erDiagram
 
 ---
 
+### 3.9 RemoteServer（远程服务器）
+
+> 远程 OpenClaw 服务器配置
+
+| 字段 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `id` | TEXT | PK | - | UUID，格式：`server_xxx` |
+| `name` | TEXT | NOT NULL | - | 服务器名称（如"北京生产环境"） |
+| `host` | TEXT | NOT NULL | - | 服务器地址 |
+| `port` | INTEGER | - | 22 | SSH 端口 |
+| `username` | TEXT | NOT NULL | - | SSH 用户名 |
+| `private_key_path` | TEXT | - | NULL | SSH 私钥路径 |
+| `remote_port` | INTEGER | - | 3001 | remote-server 监听端口 |
+| `created_at` | DATETIME | - | CURRENT_TIMESTAMP | 创建时间 |
+| `updated_at` | DATETIME | - | CURRENT_TIMESTAMP | 更新时间 |
+
+**索引**：无（主键索引）
+
+**关系**：
+- `has_many` Conversation (可选)
+
+---
+
 ## 4. 枚举定义
 
 ### 4.1 MessageRole（消息角色）
@@ -475,6 +518,15 @@ erDiagram
 | `paused` | 暂停 |
 | `deleted` | 已删除 |
 
+### 4.9 RemoteServerStatus（远程服务器状态）
+
+| 值 | 说明 |
+|----|------|
+| `disconnected` | 未连接 |
+| `connecting` | 连接中 |
+| `connected` | 已连接 |
+| `error` | 连接错误 |
+
 ---
 
 ## 5. 字段类型速查
@@ -496,6 +548,7 @@ erDiagram
 | Automation | `auto_` | `auto_jkl012` |
 | Artifact | `artifact_` | `artifact_mno345` |
 | Rule | `rule_` | `rule_file_save_protocol` |
+| RemoteServer | `server_` | `server_bj_production` |
 
 ---
 
@@ -511,6 +564,7 @@ erDiagram
 | Migration 6 | 创建 `categories` 表 |
 | Migration 7 | 修改 `experts.category` 为可空 |
 | Migration 8 | 创建 `rules` 表 |
+| Migration 9 | 创建 `remote_servers` 表，`conversations` 添加 `server_id` 列 |
 
 ---
 
@@ -535,4 +589,5 @@ erDiagram
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
 | 2026-03-23 | 1.1 | 新增 Rule 实体定义 |
+| 2026-03-30 | 1.2 | 新增 RemoteServer 实体定义，Conversation 添加 server_id |
 | 2026-03-21 | 1.0 | 基于现有代码逆向生成数据模型文档 |

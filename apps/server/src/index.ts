@@ -33,9 +33,6 @@ const config = {
   database: {
     path: process.env.DB_PATH || './data/dashboard.db',
   },
-  plugin: {
-    token: process.env.PLUGIN_TOKEN,
-  },
   openclawGateway: process.env.OPENCLAW_GATEWAY_URL && process.env.OPENCLAW_GATEWAY_TOKEN
     ? {
         url: process.env.OPENCLAW_GATEWAY_URL,

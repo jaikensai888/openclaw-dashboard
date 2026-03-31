@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { useRemoteStore } from '@/stores/remoteStore';
+import { useFileStore } from '@/stores/fileStore';
 import type { Message, Task, TaskOutput } from '@openclaw-dashboard/shared';
 
 // 动态生成 WebSocket URL，使用当前页面的 hostname
@@ -14,7 +16,6 @@ function getWebSocketUrl(): string {
   // 直接使用 self 或 window，避免 webpack 静态分析问题
   // self 在浏览器和 Web Worker 中都可用
   try {
-    // @ts-expect-error - 动态访问
     const location = self?.location || window?.location;
     if (location) {
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -400,6 +401,83 @@ function handleMessage(type: string, payload: unknown) {
       }
       break;
 
+    // Remote connection handlers
+    case 'remote.servers':
+      {
+        const { servers } = payload as {
+          servers: Array<{
+            id: string;
+            name: string;
+            host: string;
+            port: number;
+            username: string;
+            privateKeyPath?: string;
+            remotePort: number;
+            status: 'disconnected' | 'connecting' | 'connected' | 'error';
+            error?: string;
+          }>;
+        };
+        useRemoteStore.getState().setServers(servers);
+      }
+      break;
+
+    case 'remote.server.status':
+      {
+        const { id, status, error } = payload as {
+          id: string;
+          status: 'disconnected' | 'connecting' | 'connected' | 'error';
+          error?: string;
+        };
+        useRemoteStore.getState().setServerStatus(id, status, error);
+      }
+      break;
+
+    case 'remote.active':
+      {
+        const { serverId } = payload as { serverId: string | null };
+        useRemoteStore.getState().switchServer(serverId);
+      }
+      break;
+
+    // File system handlers
+    case 'directory:list:result':
+      {
+        const fileStore = useFileStore.getState();
+        const result = payload as {
+          success: boolean;
+          data?: Array<{
+            name: string;
+            path: string;
+            isDirectory: boolean;
+            size: number;
+            mtime: number;
+          }>;
+          error?: string;
+        };
+        if (result.success && result.data) {
+          fileStore.setFiles(result.data);
+        } else {
+          fileStore.setError(result.error || '加载目录失败');
+        }
+      }
+      break;
+
+    case 'file:read:result':
+      {
+        const fileStore = useFileStore.getState();
+        const result = payload as {
+          success: boolean;
+          data?: { content: string; encoding?: string };
+          error?: string;
+        };
+        if (result.success && result.data) {
+          fileStore.setFileContent(result.data.content);
+        } else {
+          fileStore.setError(result.error || '读取文件失败');
+        }
+      }
+      break;
+
     default:
       console.warn('[WS] Unknown message type:', type);
   }
@@ -570,8 +648,8 @@ export function useWebSocket() {
   );
 
   const createConversationWS = useCallback(
-    (id: string, title?: string) => {
-      send('conversation.create', { id, title });
+    (id: string, title?: string, serverId?: string) => {
+      send('conversation.create', { id, title, serverId });
     },
     []
   );
@@ -625,6 +703,24 @@ export function useWebSocket() {
     send('agents.list', {});
   }, []);
 
+  // Remote connection methods
+  const loadRemoteServers = useCallback(() => {
+    send('remote.servers', {});
+  }, []);
+
+  const switchRemoteServer = useCallback((serverId: string | null) => {
+    send('remote.switch', { serverId });
+  }, []);
+
+  // File system methods
+  const listDirectory = useCallback((path: string) => {
+    send('directory:list', { path });
+  }, []);
+
+  const readFile = useCallback((path: string) => {
+    send('file:read', { path });
+  }, []);
+
   const sendMessageWithAgent = useCallback(
     (conversationId: string, content: string, virtualAgentId?: string) => {
       const currentStore = useChatStore.getState();
@@ -656,5 +752,11 @@ export function useWebSocket() {
     deleteConversation,
     isConnected: globalState.instance?.readyState === WebSocket.OPEN,
     waitForConnection,
+    // Remote connection
+    loadRemoteServers,
+    switchRemoteServer,
+    // File system
+    listDirectory,
+    readFile,
   };
 }

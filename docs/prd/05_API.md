@@ -33,25 +33,8 @@ URL 路径版本：`/api/v1/...`
 |------|----------|------|
 | **REST API** | 无认证 | 本地部署，信任本地连接 |
 | **WebSocket (前端)** | 无认证 | 本地部署，信任本地连接 |
-| **WebSocket (插件)** | Token 认证 | 通过 `PLUGIN_TOKEN` 环境变量 |
-
-### 2.2 插件认证流程
-
-```json
-// 插件连接后发送认证消息
-{
-  "type": "plugin.auth",
-  "payload": {
-    "accountId": "plugin-account-id"
-  }
-}
-
-// 服务器响应
-{
-  "type": "plugin.auth.success",
-  "payload": {}
-}
-```
+| **REST API (远程)** | 无认证 | 本地部署，信任本地连接 |
+| **远程 JSON-RPC** | Token 认证 | remote-server 的 `auth.token` 配置 |
 
 ---
 
@@ -103,6 +86,7 @@ URL 路径版本：`/api/v1/...`
 | Category | `cat_` | `cat_012pqr345` |
 | Automation | `auto_` | `auto_678stu901` |
 | Artifact | `artifact_` | `artifact_234vwx567` |
+| RemoteServer | `server_` | `server_bj_prod_001` |
 
 ---
 
@@ -895,6 +879,111 @@ URL 路径版本：`/api/v1/...`
 
 ---
 
+### 4.8 远程服务器模块 (Remote Servers)
+
+#### [GET] /api/v1/remote/servers
+
+**描述**：获取所有远程服务器配置及连接状态
+**实现状态**：🔄 规划中
+**代码位置**：`apps/server/src/routes/remote.ts`
+
+**响应示例**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "server_bj_prod",
+      "name": "北京生产环境",
+      "host": "192.168.1.100",
+      "port": 22,
+      "username": "openclaw",
+      "privateKeyPath": "~/.ssh/dashboard_remote_key",
+      "remotePort": 3001,
+      "status": "connected",
+      "error": null,
+      "createdAt": "2026-03-30T10:00:00.000Z",
+      "updatedAt": "2026-03-30T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+#### [POST] /api/v1/remote/servers
+
+**描述**：添加远程服务器配置
+**实现状态**：🔄 规划中
+
+**请求参数**
+
+| 参数名 | 位置 | 类型 | 必填 | 说明 |
+|--------|------|------|------|------|
+| name | body | string | 是 | 服务器名称 |
+| host | body | string | 是 | 服务器地址 |
+| port | body | number | 否 | SSH 端口，默认 22 |
+| username | body | string | 是 | SSH 用户名 |
+| privateKeyPath | body | string | 是 | SSH 私钥路径 |
+| remotePort | body | number | 否 | remote-server 端口，默认 3001 |
+
+---
+
+#### [PUT] /api/v1/remote/servers/:id
+
+**描述**：更新远程服务器配置
+**实现状态**：🔄 规划中
+
+---
+
+#### [DELETE] /api/v1/remote/servers/:id
+
+**描述**：删除远程服务器配置（先断开连接）
+**实现状态**：🔄 规划中
+
+---
+
+#### [POST] /api/v1/remote/servers/:id/connect
+
+**描述**：连接远程服务器（建立 SSH 隧道）
+**实现状态**：🔄 规划中
+
+**响应示例**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "server_bj_prod",
+    "status": "connected",
+    "localPort": 13001
+  }
+}
+```
+
+---
+
+#### [POST] /api/v1/remote/servers/:id/disconnect
+
+**描述**：断开远程服务器连接
+**实现状态**：🔄 规划中
+
+---
+
+#### [PUT] /api/v1/remote/active
+
+**描述**：切换当前活跃的远程服务器
+**实现状态**：🔄 规划中
+
+**请求参数**
+
+| 参数名 | 位置 | 类型 | 必填 | 说明 |
+|--------|------|------|------|------|
+| serverId | body | string | 是 | 服务器 ID（null 切换回本地） |
+
+---
+
 ## 5. WebSocket API
 
 ### 5.1 连接
@@ -1107,6 +1196,70 @@ URL 路径版本：`/api/v1/...`
 
 ---
 
+#### remote.servers
+
+**描述**：请求远程服务器列表
+
+```json
+{
+  "type": "remote.servers",
+  "payload": {}
+}
+```
+
+**响应**: `remote.servers`
+
+---
+
+#### remote.switch
+
+**描述**：切换当前活跃的远程服务器
+
+```json
+{
+  "type": "remote.switch",
+  "payload": {
+    "serverId": "server_bj_prod"
+  }
+}
+```
+
+---
+
+#### directory:list
+
+**描述**：列出远程目录内容
+
+```json
+{
+  "type": "directory:list",
+  "payload": {
+    "path": "/workspace/project-a"
+  }
+}
+```
+
+**响应**: `directory:list:result`
+
+---
+
+#### file:read
+
+**描述**：读取远程文件内容
+
+```json
+{
+  "type": "file:read",
+  "payload": {
+    "path": "/workspace/project-a/output.log"
+  }
+}
+```
+
+**响应**: `file:read:result`
+
+---
+
 ### 5.3 服务器 → 客户端消息
 
 | 类型 | 说明 | payload 结构 |
@@ -1131,6 +1284,11 @@ URL 路径版本：`/api/v1/...`
 | `artifacts.list` | 产物列表 | `{ conversationId, artifacts: Artifact[] }` |
 | `artifact.created` | 产物创建 | `{ conversationId, artifact }` |
 | `artifact.deleted` | 产物删除 | `{ id }` |
+| `remote.servers` | 远程服务器列表 | `{ servers: RemoteServer[] }` |
+| `remote.server.status` | 服务器状态变更 | `{ serverId, status, error? }` |
+| `remote.active` | 活跃服务器切换 | `{ serverId }` |
+| `directory:list:result` | 目录列表结果 | `{ path, files: FileInfo[] }` |
+| `file:read:result` | 文件内容结果 | `{ path, content, encoding }` |
 
 ---
 
@@ -1139,3 +1297,4 @@ URL 路径版本：`/api/v1/...`
 | 日期 | 版本 | 变更内容 |
 |------|------|----------|
 | 2026-03-21 | 1.0 | 基于现有代码逆向生成 API 文档 |
+| 2026-03-30 | 1.1 | 新增远程连接 REST API 和 WebSocket 消息定义 |

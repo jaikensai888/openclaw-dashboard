@@ -1,12 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, FileText, Code, Image, File, Download, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
+import { X, FileText, Code, Image, File, Download, Trash2, ArrowLeft, Loader2, FolderOpen } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
+import { useRemoteStore } from '@/stores/remoteStore';
+import { useFileStore } from '@/stores/fileStore';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/api';
+import { FileExplorer } from '@/components/remote/FileExplorer';
+import { FilePreview } from '@/components/remote/FilePreview';
 
 type ViewMode = 'list' | 'preview';
+type TabMode = 'artifacts' | 'remote';
 
 interface ArtifactContent {
   id: string;
@@ -27,10 +33,59 @@ export function ArtifactsPanel() {
     currentConversationId,
   } = useChatStore();
 
+  const { activeServerId } = useRemoteStore();
+  const { selectedFile, setSelectedFile, setFileContent } = useFileStore();
+  const { listDirectory: wsListDirectory, readFile: wsReadFile } = useWebSocket();
+
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [tabMode, setTabMode] = useState<TabMode>('artifacts');
   const [previewContent, setPreviewContent] = useState<ArtifactContent | null>(null);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
+
+  // Reset tab to artifacts when panel closes
+  useEffect(() => {
+    if (!artifactsPanelOpen) {
+      setTabMode('artifacts');
+      setViewMode('list');
+    }
+  }, [artifactsPanelOpen]);
+
+  // WebSocket send wrapper for FileExplorer
+  const wsSend = (type: string, payload: unknown) => {
+    // Map FileExplorer actions to WebSocket messages
+    if (type === 'directory:list') {
+      const p = payload as { path: string };
+      wsListDirectory(p.path);
+    } else if (type === 'file:read') {
+      const p = payload as { path: string };
+      wsReadFile(p.path);
+    }
+  };
+
+  // Handle file selection from FileExplorer
+  const handleFileSelect = (path: string) => {
+    setSelectedFile(path);
+    setViewMode('preview');
+  };
+
+  const handleFileBack = () => {
+    setSelectedFile(null);
+    setFileContent(null);
+    setViewMode('list');
+  };
+
+  const handleFileRefresh = () => {
+    if (selectedFile) {
+      wsReadFile(selectedFile);
+    }
+  };
+
+  // Handle artifact selection (switch to artifacts tab and preview)
+  const handleSelectArtifactWithTab = (artifactId: string) => {
+    setTabMode('artifacts');
+    handleSelectArtifact(artifactId);
+  };
 
   if (!artifactsPanelOpen) return null;
 
@@ -245,7 +300,7 @@ export function ArtifactsPanel() {
         {/* Header */}
         <div className="p-4 border-b border-neutral-700">
           <div className="flex items-center justify-between">
-            {viewMode === 'preview' ? (
+            {viewMode === 'preview' && tabMode === 'artifacts' ? (
               <>
                 <button
                   onClick={handleBackToList}
@@ -284,11 +339,6 @@ export function ArtifactsPanel() {
               <>
                 <div className="min-w-0 flex-1">
                   <h2 className="text-sm font-medium text-neutral-200">产物面板</h2>
-                  {currentConversationId && (
-                    <p className="text-xs text-neutral-500 mt-0.5 truncate" title={`data/conversations/${currentConversationId}/`}>
-                      📁 data/conversations/{currentConversationId}/
-                    </p>
-                  )}
                 </div>
                 <button
                   onClick={() => setArtifactsPanelOpen(false)}
@@ -311,7 +361,50 @@ export function ArtifactsPanel() {
 
         {/* Content */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          {viewMode === 'list' ? (
+          {/* Tab Switcher - only in list mode */}
+          {viewMode === 'list' && (
+            <div className="flex border-b border-neutral-700">
+              <button
+                onClick={() => setTabMode('artifacts')}
+                className={cn(
+                  'flex-1 px-4 py-2 text-sm transition-colors',
+                  tabMode === 'artifacts'
+                    ? 'text-neutral-200 border-b-2 border-primary-500'
+                    : 'text-neutral-500 hover:text-neutral-300'
+                )}
+              >
+                <FileText className="w-4 h-4 inline mr-1.5" />
+                本地产物
+              </button>
+              <button
+                onClick={() => setTabMode('remote')}
+                className={cn(
+                  'flex-1 px-4 py-2 text-sm transition-colors',
+                  tabMode === 'remote'
+                    ? 'text-neutral-200 border-b-2 border-primary-500'
+                    : 'text-neutral-500 hover:text-neutral-300'
+                )}
+              >
+                <FolderOpen className="w-4 h-4 inline mr-1.5" />
+                远程文件
+              </button>
+            </div>
+          )}
+
+          {tabMode === 'remote' && viewMode === 'list' ? (
+            // Remote File Explorer
+            <FileExplorer
+              onFileSelect={handleFileSelect}
+              wsSend={wsSend}
+            />
+          ) : tabMode === 'remote' && selectedFile && viewMode === 'preview' ? (
+            // Remote File Preview
+            <FilePreview
+              filePath={selectedFile}
+              onBack={handleFileBack}
+              onRefresh={handleFileRefresh}
+            />
+          ) : viewMode === 'list' ? (
             // List view
             currentConversationArtifacts.length === 0 ? (
               <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm p-4 text-center">

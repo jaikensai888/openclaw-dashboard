@@ -19,9 +19,6 @@ export interface AppConfig {
   database: {
     path: string;
   };
-  plugin?: {
-    token?: string;
-  };
   /** Openclaw Gateway direct connection configuration */
   openclawGateway?: OpenclawGatewayConfig;
 }
@@ -42,7 +39,6 @@ export function createConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     ...defaultConfig,
     ...overrides,
     database: { ...defaultConfig.database, ...overrides.database },
-    plugin: { ...defaultConfig.plugin, ...overrides.plugin },
     openclawGateway: overrides.openclawGateway ? {
       reconnectInterval: 5000,
       connectionTimeout: 30000,
@@ -66,10 +62,6 @@ export function loadConfigFromEnv(): Partial<AppConfig> {
   if (process.env.DATABASE_PATH) {
     config.database = { path: process.env.DATABASE_PATH };
   }
-  if (process.env.PLUGIN_TOKEN) {
-    config.plugin = { token: process.env.PLUGIN_TOKEN };
-  }
-
   // Openclaw Gateway configuration from environment
   const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL;
   const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;

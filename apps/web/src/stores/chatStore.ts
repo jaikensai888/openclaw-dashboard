@@ -54,6 +54,7 @@ interface Conversation {
   createdAt: Date;
   updatedAt: Date;
   expertId?: string | null;  // 新增
+  serverId?: string | null;  // 远程服务器 ID，null 为本地
 }
 
 interface Message {
@@ -117,7 +118,7 @@ interface ChatState {
   currentConversationId: string | null;
   isHistoryLoaded: boolean;
   setCurrentConversation: (id: string) => void;
-  createConversation: (title?: string) => string;
+  createConversation: (title?: string, serverId?: string | null) => string;
   deleteConversation: (id: string) => void;
   setConversations: (conversations: Conversation[]) => void;
   setHistoryLoaded: (loaded: boolean) => void;
@@ -227,13 +228,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return { currentConversationId: id };
   }),
 
-  createConversation: (title) => {
+  createConversation: (title, serverId?: string | null) => {
     const id = `conv_${Date.now().toString(36)}`;
     const now = new Date();
     const newConv: Conversation = {
       id,
       title: title || '新对话',
       pinned: false,
+      serverId: serverId || null,
       createdAt: now,
       updatedAt: now,
     };

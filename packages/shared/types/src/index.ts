@@ -164,35 +164,6 @@ export type WSTaskFailedPayload = {
   error?: string;
 };
 
-// Plugin -> Server
-export type WSPluginAuthPayload = {
-  accountId: string;
-  pluginVersion?: string;
-};
-
-export type WSAgentMessagePayload = {
-  conversationId: string;
-  content: string;
-};
-
-export type WSAgentStreamingPayload = {
-  conversationId: string;
-  delta: string;
-};
-
-export type WSAgentMediaPayload = {
-  conversationId: string;
-  text?: string;
-  mediaUrl: string;
-};
-
-// Server -> Plugin
-export type WSUserMessagePayload = {
-  conversationId: string;
-  content: string;
-  messageId: string;
-};
-
 // ------------------------------------------------------------
 // API Response Types
 // ------------------------------------------------------------
@@ -280,3 +251,95 @@ export type WSChatSendWithAgentPayload = {
 
 /** Handoff marker pattern for parsing agent output */
 export const HANDOFF_PATTERN = /^HANDOFF:(\w+)(?::(.+))?$/m;
+
+// ------------------------------------------------------------
+// Remote Connection Types
+// ------------------------------------------------------------
+
+export type RemoteServerStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface RemoteServerInfo {
+  id: string;                          // Format: server_xxx
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  privateKeyPath?: string;
+  remotePort: number;
+  status: RemoteServerStatus;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FileInfo {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  mtime: string;
+}
+
+export interface FileContent {
+  content: string;
+  encoding: string;
+  path: string;
+}
+
+// Remote WebSocket Message Types — Client -> Server
+export type WSRemoteSwitchPayload = {
+  serverId: string | null;
+};
+
+export type WSDirectoryListPayload = {
+  path: string;
+  serverId?: string;
+};
+
+export type WSFileReadPayload = {
+  path: string;
+  serverId?: string;
+};
+
+export type WSWatchSubscribePayload = {
+  path: string;
+  recursive?: boolean;
+};
+
+export type WSWatchUnsubscribePayload = {
+  subscriptionId: string;
+};
+
+// Remote WebSocket Message Types — Server -> Client
+export type WSRemoteServersResultPayload = {
+  servers: RemoteServerInfo[];
+};
+
+export type WSRemoteServerStatusPayload = {
+  id: string;
+  status: RemoteServerStatus;
+  error?: string;
+};
+
+export type WSRemoteActivePayload = {
+  serverId: string | null;
+};
+
+export type WSDirectoryListResultPayload = {
+  path: string;
+  files: FileInfo[];
+  error?: string;
+};
+
+export type WSFileReadResultPayload = {
+  path: string;
+  content: string;
+  encoding: string;
+  error?: string;
+};
+
+export type WSWatchEventPayload = {
+  subscriptionId: string;
+  path: string;
+  type: 'created' | 'changed' | 'deleted';
+};

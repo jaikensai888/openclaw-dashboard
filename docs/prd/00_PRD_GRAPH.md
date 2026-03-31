@@ -139,8 +139,7 @@ openclaw-dashboard/
 │           └── index.ts        # 入口
 │
 ├── packages/
-│   ├── shared/                 # 共享类型
-│   └── dashboard-plugin/       # Openclaw 插件
+│   └── shared/                 # 共享类型
 │
 └── docs/
     └── prd/                    # 设计文档
@@ -330,6 +329,8 @@ Dashboard
 
 | 日期 | 文档 | 变更内容 |
 |------|------|----------|
+| 2026-03-30 | 00_PRD_GRAPH.md | 新增远程连接功能模块（迭代 3） |
+| 2026-03-30 | 00_PRD_GRAPH.md | 新增远程连接功能模块（迭代 3） |
 | 2026-03-23 | 00_PRD_GRAPH.md | 新增规则维护功能模块 |
 | 2026-03-21 | 00_PRD_GRAPH.md | 初始化设计总览 |
 

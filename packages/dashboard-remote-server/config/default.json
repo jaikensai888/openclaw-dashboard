@@ -1,0 +1,22 @@
+{
+  "port": 3002,
+  "host": "0.0.0.0",
+  "auth": {
+    "token": ""
+  },
+  "gateway": {
+    "url": "",
+    "token": "",
+    "reconnectInterval": 5000,
+    "connectionTimeout": 30000
+  },
+  "filesystem": {
+    "allowedRoots": ["."],
+    "maxFileSize": 10485760,
+    "followSymlinks": false
+  },
+  "logging": {
+    "level": "info",
+    "pretty": true
+  }
+}

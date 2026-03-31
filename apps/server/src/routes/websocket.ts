@@ -7,11 +7,11 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { run, get, all } from '../db/index.js';
-import { pluginManager } from '../services/pluginManager.js';
 import { messageParser } from '../services/messageParser.js';
 import { taskManager } from '../services/taskManager.js';
 import { getOrchestrator, type OrchestratorEvent } from '../services/orchestrator.js';
 import { getGatewayClient } from '../services/openclawGatewayClient.js';
+import { getRemoteConnectionManager } from '../remote/manager.js';
 import {
   saveArtifact,
   listArtifacts,
@@ -29,9 +29,6 @@ interface ClientConnection {
 const clients = new Map<WebSocket, ClientConnection>();
 
 export async function websocketRoutes(fastify: FastifyInstance) {
-  // Register plugin message handlers
-  setupPluginMessageHandlers();
-
   // Register orchestrator event handlers
   setupOrchestratorHandlers();
 
@@ -114,18 +111,42 @@ function handleClientMessage(ws: WebSocket, message: { type: string; payload?: u
       handleLoadArtifacts(ws, payload as { conversationId: string });
       break;
 
+    case 'remote.servers':
+      handleRemoteServers(ws);
+      break;
+
+    case 'remote.switch':
+      handleRemoteSwitch(ws, payload as { serverId?: string });
+      break;
+
+    case 'directory:list':
+      handleDirectoryList(ws, payload as { path: string; recursive?: boolean; serverId?: string });
+      break;
+
+    case 'file:read':
+      handleFileRead(ws, payload as { path: string; serverId?: string });
+      break;
+
+    case 'watch.subscribe':
+      handleWatchSubscribe(ws, payload as { path: string; recursive?: boolean; serverId?: string });
+      break;
+
+    case 'watch.unsubscribe':
+      handleWatchUnsubscribe(ws, payload as { subscriptionId: string; serverId?: string });
+      break;
+
     default:
       sendError(ws, 'UNKNOWN_TYPE', `Unknown message type: ${type}`);
   }
 }
 
-async function handleCreateConversation(ws: WebSocket, payload?: { id?: string; title?: string }) {
+async function handleCreateConversation(ws: WebSocket, payload?: { id?: string; title?: string; serverId?: string }) {
   const conversationId = payload?.id || `conv_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
   const now = new Date().toISOString();
 
   run(
-    `INSERT INTO conversations (id, title, pinned, created_at, updated_at) VALUES (?, ?, 0, ?, ?)`,
-    [conversationId, payload?.title || null, now, now]
+    `INSERT INTO conversations (id, title, pinned, created_at, updated_at, server_id) VALUES (?, ?, 0, ?, ?, ?)`,
+    [conversationId, payload?.title || null, now, now, payload?.serverId || null]
   );
 
   const client = clients.get(ws);
@@ -137,6 +158,7 @@ async function handleCreateConversation(ws: WebSocket, payload?: { id?: string; 
     id: conversationId,
     title: payload?.title || null,
     pinned: false,
+    serverId: payload?.serverId || null,
     createdAt: now,
     updatedAt: now,
   });
@@ -265,35 +287,36 @@ async function handleChatSend(ws: WebSocket, payload?: {
       conversationId,
       content,
       virtualAgentId,
-      expertSystemPrompt,  // 新增
+      expertSystemPrompt,
     });
 
     if (result.error) {
-      console.log(`[WS] Gateway error: ${result.error}, falling back to plugin`);
+      console.log(`[WS] Gateway error: ${result.error}`);
+      const assistantMessageId = `msg_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
+      const errorMsg = `Gateway 请求失败: ${result.error}`;
+
+      run(
+        `INSERT INTO messages (id, conversation_id, role, content, message_type, created_at)
+         VALUES (?, ?, 'assistant', ?, 'text', ?)`,
+        [assistantMessageId, conversationId, errorMsg, now]
+      );
+
+      broadcast('chat.message', {
+        id: assistantMessageId,
+        conversationId,
+        role: 'assistant',
+        content: errorMsg,
+        messageType: 'text',
+        createdAt: now,
+      });
     } else {
       console.log(`[WS] Gateway accepted, runId: ${result.runId}`);
       return;
     }
-  }
-
-  // Fallback to plugin mode
-  const accountIds = pluginManager.getConnectedAccountIds();
-  console.log(`[WS] Connected plugin accounts: ${accountIds.length > 0 ? accountIds.join(', ') : 'none'}`);
-
-  if (accountIds.length > 0) {
-    const sent = pluginManager.send(accountIds[0], {
-      type: 'user.message',
-      payload: {
-        conversationId,
-        content,
-        messageId,
-      },
-    });
-    console.log(`[WS] Forwarded to plugin ${accountIds[0]}: ${sent ? 'success' : 'failed'}`);
   } else {
-    console.log(`[WS] No plugin connected, showing error message`);
+    console.log(`[WS] Gateway not connected`);
     const assistantMessageId = `msg_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
-    const errorMsg = 'Openclaw 未连接。请确保 Dashboard 插件已安装并运行。';
+    const errorMsg = 'Gateway 未连接。请检查 OPENCLAW_GATEWAY_URL 和 OPENCLAW_GATEWAY_TOKEN 配置。';
 
     run(
       `INSERT INTO messages (id, conversation_id, role, content, message_type, created_at)
@@ -427,64 +450,6 @@ async function handleLoadArtifacts(ws: WebSocket, payload: { conversationId: str
   send(ws, 'artifacts.list', {
     conversationId,
     artifacts,
-  });
-}
-
-function setupPluginMessageHandlers() {
-  pluginManager.onMessage('plugin.auth', (data) => {
-    const { accountId } = data.payload as { accountId: string };
-    pluginManager.authenticate(accountId);
-    pluginManager.send(accountId, {
-      type: 'plugin.auth.success',
-      payload: {},
-    });
-  });
-
-  pluginManager.onMessage('agent.message', (data) => {
-    const payload = data.payload as { conversationId: string; content: string };
-    handleAgentMessage(payload.conversationId, payload.content);
-  });
-
-  pluginManager.onMessage('agent.message.streaming', (data) => {
-    const payload = data.payload as { conversationId: string; delta: string };
-    broadcast('chat.streaming', {
-      conversationId: payload.conversationId,
-      delta: payload.delta,
-      done: false,
-    });
-  });
-
-  pluginManager.onMessage('agent.message.done', (data) => {
-    const payload = data.payload as { conversationId: string };
-    broadcast('chat.streaming', {
-      conversationId: payload.conversationId,
-      delta: '',
-      done: true,
-    });
-  });
-
-  pluginManager.onMessage('agent.media', (data) => {
-    const payload = data.payload as { conversationId: string; text?: string; mediaUrl: string };
-    const messageId = `msg_${uuidv4().replace(/-/g, '').slice(0, 12)}`;
-    const now = new Date().toISOString();
-
-    if (payload.text) {
-      run(
-        `INSERT INTO messages (id, conversation_id, role, content, message_type, created_at)
-         VALUES (?, ?, 'assistant', ?, 'text', ?)`,
-        [messageId, payload.conversationId, payload.text, now]
-      );
-    }
-
-    broadcast('chat.message', {
-      id: messageId,
-      conversationId: payload.conversationId,
-      role: 'assistant',
-      content: payload.text || `[Media: ${payload.mediaUrl}]`,
-      messageType: 'text',
-      metadata: { mediaUrl: payload.mediaUrl },
-      createdAt: now,
-    });
   });
 }
 
@@ -677,6 +642,145 @@ function broadcast(type: string, payload: unknown) {
     if (client.ws.readyState === 1) {
       client.ws.send(message);
     }
+  }
+}
+
+// ==================== Remote Handlers ====================
+
+async function handleRemoteServers(ws: WebSocket) {
+  const servers = all<{
+    id: string;
+    name: string;
+    host: string;
+    port: number;
+    username: string;
+    private_key_path: string | null;
+    remote_port: number;
+    created_at: string;
+    updated_at: string;
+  }>('SELECT * FROM remote_servers ORDER BY created_at DESC');
+
+  const manager = getRemoteConnectionManager();
+  const statuses = manager ? manager.getAllServersStatus() : [];
+
+  const result = servers.map(server => {
+    const status = statuses.find(s => s.serverId === server.id);
+    return {
+      id: server.id,
+      name: server.name,
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      privateKeyPath: server.private_key_path,
+      remotePort: server.remote_port,
+      status: status
+        ? (status.rpcConnected ? 'connected' : status.tunnelStatus?.status || 'disconnected')
+        : 'disconnected',
+      createdAt: server.created_at,
+      updatedAt: server.updated_at,
+    };
+  });
+
+  send(ws, 'remote.servers', { servers: result });
+}
+
+async function handleRemoteSwitch(ws: WebSocket, payload: { serverId?: string }) {
+  const manager = getRemoteConnectionManager();
+  if (!manager) {
+    sendError(ws, 'NOT_INITIALIZED', '远程连接管理器未初始化');
+    return;
+  }
+
+  manager.setActiveServer(payload.serverId || null);
+  broadcast('remote.active', { activeServerId: payload.serverId || null });
+}
+
+async function handleDirectoryList(ws: WebSocket, payload: { path: string; recursive?: boolean; serverId?: string }) {
+  const manager = getRemoteConnectionManager();
+  const serverId = payload.serverId;
+
+  if (serverId && manager) {
+    const client = manager.getClient(serverId) || manager.getActiveClient();
+    if (!client || !client.isConnected) {
+      sendError(ws, 'NOT_CONNECTED', '远程服务器未连接');
+      return;
+    }
+    try {
+      const files = await client.listDirectory(payload.path, payload.recursive);
+      send(ws, 'directory:list:result', { files, path: payload.path });
+    } catch (error) {
+      sendError(ws, 'DIRECTORY_LIST_ERROR', String(error));
+    }
+  } else {
+    sendError(ws, 'NOT_CONNECTED', '未指定远程服务器');
+  }
+}
+
+async function handleFileRead(ws: WebSocket, payload: { path: string; serverId?: string }) {
+  const manager = getRemoteConnectionManager();
+  const serverId = payload.serverId;
+
+  if (serverId && manager) {
+    const client = manager.getClient(serverId) || manager.getActiveClient();
+    if (!client || !client.isConnected) {
+      sendError(ws, 'NOT_CONNECTED', '远程服务器未连接');
+      return;
+    }
+    try {
+      const content = await client.readFile(payload.path);
+      send(ws, 'file:read:result', { content, path: payload.path });
+    } catch (error) {
+      sendError(ws, 'FILE_READ_ERROR', String(error));
+    }
+  } else {
+    sendError(ws, 'NOT_CONNECTED', '未指定远程服务器');
+  }
+}
+
+async function handleWatchSubscribe(ws: WebSocket, payload: { path: string; recursive?: boolean; serverId?: string }) {
+  const manager = getRemoteConnectionManager();
+  const serverId = payload.serverId;
+
+  if (serverId && manager) {
+    const client = manager.getClient(serverId) || manager.getActiveClient();
+    if (!client || !client.isConnected) {
+      sendError(ws, 'NOT_CONNECTED', '远程服务器未连接');
+      return;
+    }
+    try {
+      const result = await client.watchSubscribe(payload.path);
+      send(ws, 'watch.subscribed', { subscriptionId: result.subscriptionId, path: payload.path });
+
+      // Forward watch events to this WebSocket
+      client.onWatchEvent((event) => {
+        send(ws, 'watch.event', event);
+      });
+    } catch (error) {
+      sendError(ws, 'WATCH_SUBSCRIBE_ERROR', String(error));
+    }
+  } else {
+    sendError(ws, 'NOT_CONNECTED', '未指定远程服务器');
+  }
+}
+
+async function handleWatchUnsubscribe(ws: WebSocket, payload: { subscriptionId: string; serverId?: string }) {
+  const manager = getRemoteConnectionManager();
+  const serverId = payload.serverId;
+
+  if (serverId && manager) {
+    const client = manager.getClient(serverId) || manager.getActiveClient();
+    if (!client || !client.isConnected) {
+      sendError(ws, 'NOT_CONNECTED', '远程服务器未连接');
+      return;
+    }
+    try {
+      await client.watchUnsubscribe(payload.subscriptionId);
+      send(ws, 'watch.unsubscribed', { subscriptionId: payload.subscriptionId });
+    } catch (error) {
+      sendError(ws, 'WATCH_UNSUBSCRIBE_ERROR', String(error));
+    }
+  } else {
+    sendError(ws, 'NOT_CONNECTED', '未指定远程服务器');
   }
 }
 
